@@ -171,9 +171,12 @@ def write_results():
             'scanner_score':              str(r.get('score', '')),
             'scanner_hook':               r.get('hook', '')[:65000],
             'scanner_recommendation':     r.get('recommendation', '')[:65000],
+            'scanner_track_reason':       r.get('track_reason', '')[:65000],
             'scanner_connections':        conn_json,
             'scanner_connection_summary': conn_summary,
             'scanner_override':           'true' if r.get('override') else '',
+            'scanner_override_note':      r.get('override_note', '')[:65000],
+            'scanner_notes':              r.get('notes', '')[:65000],
         }
         # Remove empty values — don't overwrite HubSpot fields with blanks
         props = {k: v for k, v in props.items() if v}
