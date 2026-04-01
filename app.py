@@ -10,6 +10,13 @@ from flask_cors import CORS
 app = Flask(__name__, static_folder='.')
 CORS(app)
 
+@app.after_request
+def allow_iframe(response):
+    # Allow embedding from Toluca Tools
+    response.headers['X-Frame-Options'] = 'ALLOWALL'
+    response.headers['Content-Security-Policy'] = "frame-ancestors *"
+    return response
+
 HUBSPOT_TOKEN  = os.environ.get('HUBSPOT_TOKEN', '')
 ANTHROPIC_KEY  = os.environ.get('ANTHROPIC_KEY', '')
 HUBSPOT_BASE   = 'https://api.hubspot.com'
