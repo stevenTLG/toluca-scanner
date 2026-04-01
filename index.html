@@ -207,6 +207,7 @@
   <div class="page-nav">
     <button class="page-tab active" id="tab-screener" onclick="showPage('screener')">&#9646; Screener</button>
     <button class="page-tab" id="tab-criteria" onclick="showPage('criteria')">&#9881; Criteria &amp; Weights</button>
+    <button class="page-tab" id="tab-email" onclick="showPage('email')">&#9993; Email Template</button>
   </div>
   <div id="page-screener" class="page active">
 
@@ -563,6 +564,140 @@ const BATCH_CONTACTS = JSON.parse(document.getElementById('batch-contacts-data')
 const STEVEN_PROFILE = JSON.parse(document.getElementById('steven-profile-data').textContent);
 
 let allContacts = BATCH_CONTACTS;
+
+// ── Batch loading from HubSpot ───────────────────────────────────────────────
+const urlParams = new URLSearchParams(window.location.search);
+const BATCH_ID = urlParams.get('batch') || '';
+
+async function loadBatchFromHubSpot(batchId) {
+  document.getElementById('headerDesc').textContent = `Loading batch ${batchId} from HubSpot...`;
+  document.getElementById('statTotal').textContent = '...';
+  try {
+    const resp = await fetch(`/api/batch-contacts?batch_id=${encodeURIComponent(batchId)}`);
+    const data = await resp.json();
+    if (!resp.ok || data.error) {
+      document.getElementById('headerDesc').textContent = `Error loading batch: ${data.error}`;
+      return;
+    }
+    allContacts = data.contacts;
+    results = {};
+    overrides = {};
+    notes = {};
+    hookEdits = {};
+    document.getElementById('statTotal').textContent = allContacts.length;
+    document.getElementById('headerDesc').textContent = `${batchId} — ${allContacts.length} contacts from HubSpot`;
+    renderTable();
+    updateStats();
+    showBatchControls(batchId);
+  } catch(e) {
+    document.getElementById('headerDesc').textContent = `Failed to load batch: ${e.message}`;
+  }
+}
+
+function showBatchControls(batchId) {
+  const existing = document.getElementById('batch-action-bar');
+  if (existing) return;
+  const toolbar = document.querySelector('.toolbar');
+  const bar = document.createElement('div');
+  bar.id = 'batch-action-bar';
+  bar.style.cssText = 'display:flex;gap:10px;align-items:center;margin-bottom:12px;padding:12px 16px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.2);border-radius:8px;flex-wrap:wrap';
+  bar.innerHTML = `
+    <span style="font-size:12px;color:var(--gold);font-weight:600;letter-spacing:0.5px">${batchId}</span>
+    <span style="font-size:11px;color:var(--text-muted)">${allContacts.length} contacts</span>
+    <div style="flex:1"></div>
+    <button class="btn btn-secondary" onclick="writeResultsToHubSpot()" style="font-size:12px;padding:8px 16px" id="btn-write-hs">
+      ↑ Write to HubSpot
+    </button>
+    <button class="btn btn-primary" onclick="pushToReplyIo()" style="font-size:12px;padding:8px 16px" id="btn-push-reply">
+      → Push to Reply.io
+    </button>
+  `;
+  toolbar.parentNode.insertBefore(bar, toolbar);
+}
+
+async function writeResultsToHubSpot() {
+  const btn = document.getElementById('btn-write-hs');
+  const doneContacts = allContacts
+    .map((c, i) => ({ contact: c, result: results[i] }))
+    .filter(({ result }) => result && result.status === 'done' && c => c);
+
+  const payload = allContacts
+    .map((c, i) => {
+      const r = results[i];
+      if (!r || r.status !== 'done' || !c.hubspot_id) return null;
+      return {
+        hubspot_id:     c.hubspot_id,
+        track:          overrides[i] ? (overrides[i] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track,
+        score:          r.score,
+        hook:           hookEdits[i] !== undefined ? hookEdits[i] : (r.hook || ''),
+        recommendation: r.recommendation || '',
+        connections:    r.connections || [],
+        override:       !!overrides[i]
+      };
+    })
+    .filter(Boolean);
+
+  if (!payload.length) { alert('No screened contacts to write.'); return; }
+  btn.textContent = 'Writing...'; btn.disabled = true;
+
+  try {
+    const resp = await fetch('/api/write-results', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ results: payload })
+    });
+    const data = await resp.json();
+    btn.textContent = `✓ ${data.updated} written`;
+    setTimeout(() => { btn.textContent = '↑ Write to HubSpot'; btn.disabled = false; }, 3000);
+  } catch(e) {
+    btn.textContent = 'Error'; btn.disabled = false;
+    console.error(e);
+  }
+}
+
+async function pushToReplyIo() {
+  const btn = document.getElementById('btn-push-reply');
+  const personalSeqId = prompt('Personal Outreach sequence ID (Reply.io):');
+  if (!personalSeqId) return;
+  const standardSeqId = prompt('Standard Sequence sequence ID (Reply.io):');
+  if (!standardSeqId) return;
+
+  const contacts = allContacts
+    .map((c, i) => {
+      const r = results[i];
+      if (!r || r.status !== 'done' || !c.email) return null;
+      const track = overrides[i] ? (overrides[i] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track;
+      return {
+        email:     c.email,
+        firstName: c.firstName,
+        lastName:  c.lastName,
+        track,
+        hook: hookEdits[i] !== undefined ? hookEdits[i] : (r.hook || '')
+      };
+    })
+    .filter(Boolean);
+
+  if (!contacts.length) { alert('No screened contacts with emails to push.'); return; }
+  btn.textContent = 'Pushing...'; btn.disabled = true;
+
+  try {
+    const resp = await fetch('/api/push-replyio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contacts,
+        personal_sequence_id: parseInt(personalSeqId),
+        standard_sequence_id: parseInt(standardSeqId)
+      })
+    });
+    const data = await resp.json();
+    btn.textContent = `✓ ${data.enrolled} enrolled`;
+    setTimeout(() => { btn.textContent = '→ Push to Reply.io'; btn.disabled = false; }, 3000);
+  } catch(e) {
+    btn.textContent = 'Error'; btn.disabled = false;
+    console.error(e);
+  }
+}
 let results = {};
 let overrides = {};   // index -> true/false
 let notes = {};       // index -> string
@@ -647,9 +782,16 @@ function addTokenUsage(inputTok, outputTok) {
 }
 
 document.getElementById('statTotal').textContent = allContacts.length;
-document.getElementById('headerDesc').textContent = `Test A v2 (1-at-a-time)  -  first 100 of ${allContacts.length} contacts`;
-DOM['controlTitle'].textContent = `Loading saved results...`;
+document.getElementById('headerDesc').textContent = BATCH_ID
+  ? `Loading ${BATCH_ID}...`
+  : `${allContacts.length} contacts loaded`;
+DOM['controlTitle'].textContent = 'Loading saved results...';
 renderTable();
+
+// If batch_id in URL, load from HubSpot
+if (BATCH_ID) {
+  loadBatchFromHubSpot(BATCH_ID);
+}
 
 // Load all persistent state on startup
 (async () => {
@@ -1537,11 +1679,19 @@ function buildRowHTML(contact, result, index) {
     }
   }
 
-  // HOOK CELL (editable)
+  // HOOK CELL (editable) — shows email preview button if template is set
   const isPersonalFinal = (result && result.track === 'Personal Outreach') || hasOverride;
+  const hasTemplate = !!(emailTemplate.subject || emailTemplate.body);
   let hookCellContent;
   if (!result || result.status !== 'done') {
     hookCellContent = '<span style="color:var(--text-muted);font-size:12px"> - </span>';
+  } else if (hasTemplate && result.status === 'done') {
+    // Show email preview button + hook text
+    const hookPreview = currentHook ? `<div class="hook-text" onclick="startHookEdit(${index})" title="Click to edit" style="font-size:11px;color:var(--text-muted);margin-top:4px">${escapeHtml(currentHook.slice(0,80))}${currentHook.length>80?'...':''}</div>` : '';
+    hookCellContent = `<div class="hook-cell-inner">
+      <button onclick="toggleEmailPreview(${index})" style="font-size:10px;font-weight:600;letter-spacing:0.5px;padding:3px 10px;border-radius:4px;border:1px solid rgba(201,168,76,0.4);background:rgba(201,168,76,0.1);color:var(--gold);cursor:pointer" title="View full email draft">&#9993; View Email</button>
+      ${hookPreview}
+    </div>`;
   } else if (isPersonalFinal && currentHook) {
     hookCellContent = `<div class="hook-text" onclick="startHookEdit(${index})" title="Click to edit">${escapeHtml(currentHook)}</div>`;
   } else if (isPersonalFinal) {
@@ -1868,7 +2018,8 @@ function _buildExcel(screened) {
     'Stop Reason', 'Duration (s)', 'Retries', 'Web Search Used',
     'Parse Salvaged', 'Screen Failed', 'Low Data Gated',
     // Notes
-    'Notes', 'Industry Cluster'
+    'Notes', 'Industry Cluster',
+    'Email Subject', 'Email Body'
   ];
 
   const rows = screened.map(({ c, r, i }) => {
@@ -1908,7 +2059,8 @@ function _buildExcel(screened) {
       m.parse_salvaged ? 'Yes' : 'No',
       r.screenFailed ? 'Yes' : 'No',
       r.lowDataGated ? 'Yes' : 'No',
-      notes[i] || '', r.industryCluster || ''
+      notes[i] || '', r.industryCluster || '',
+      ...((() => { const em = getFullEmail(c, r, i); return em ? [em.subject, em.body] : ['','']; })())
     ];
   });
 
@@ -2147,11 +2299,12 @@ function parseCSVRow(line) {
 
 // ─── PAGE NAV ─────────────────────────────────────────────────
 function showPage(name) {
-  ['screener','criteria'].forEach(p => {
+  ['screener','criteria','email'].forEach(p => {
     document.getElementById('page-'+p).classList.toggle('active', p===name);
     document.getElementById('tab-'+p).classList.toggle('active', p===name);
   });
   if (name==='criteria') renderCriteriaPage();
+  if (name==='email') loadEmailTemplate();
 }
 
 // ─── CRITERIA STATE ───────────────────────────────────────────
@@ -2392,6 +2545,146 @@ async function saveCriteria() {
   setTimeout(() => saved.style.display='none', 3000);
   updateThresholdPct();
 }
+
+// ─── EMAIL PREVIEW IN ROW ─────────────────────────────────────
+function toggleEmailPreview(index) {
+  const existingId = `email-preview-row-${index}`;
+  const existing = document.getElementById(existingId);
+  if (existing) { existing.remove(); return; }
+
+  const contact = allContacts[index];
+  const result = results[index];
+  if (!contact || !result) return;
+
+  const email = getFullEmail(contact, result, index);
+  if (!email) { showAlert('Save an email template first (Email Template tab).'); return; }
+
+  const row = document.getElementById(`row-${index}`);
+  if (!row) return;
+
+  const previewRow = document.createElement('tr');
+  previewRow.id = existingId;
+  previewRow.innerHTML = `<td colspan="7" style="padding:0">
+    <div style="background:var(--dark-2);border-left:3px solid var(--gold);padding:20px 24px;margin:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold)">Email Draft — ${escapeHtml(contact.company || '')}</div>
+        <div style="display:flex;gap:8px">
+          <button onclick="copyEmail(${index})" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--dark-3);color:var(--text);cursor:pointer">&#128203; Copy</button>
+          <button onclick="toggleEmailPreview(${index})" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--dark-3);color:var(--text-muted);cursor:pointer">&#x2715; Close</button>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Subject: <span style="color:var(--text)">${escapeHtml(email.subject)}</span></div>
+      <div style="border-top:1px solid var(--border);margin:10px 0"></div>
+      <div style="font-size:13px;color:var(--text);line-height:1.8;white-space:pre-wrap">${escapeHtml(email.body)}</div>
+    </div>
+  </td>`;
+  row.after(previewRow);
+}
+
+function copyEmail(index) {
+  const contact = allContacts[index];
+  const result = results[index];
+  if (!contact || !result) return;
+  const email = getFullEmail(contact, result, index);
+  if (!email) return;
+  const text = `Subject: ${email.subject}\n\n${email.body}`;
+  navigator.clipboard.writeText(text).then(() => {
+    showAlert('Email copied to clipboard.');
+  }).catch(() => {
+    showAlert('Could not copy — please select and copy manually.');
+  });
+}
+let emailTemplate = { subject: '', body: '' };
+
+function spinHash(str) {
+  // Simple deterministic hash of a string -> number 0-999
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function applySpintax(text, seed) {
+  // Recursively resolve {a|b|c} using deterministic seed
+  let counter = 0;
+  function resolve(t) {
+    return t.replace(/\{([^{}]+)\}/g, (match, inner) => {
+      const resolved = resolve(inner);
+      const options = resolved.split('|');
+      const idx = (seed + counter++) % options.length;
+      return options[idx];
+    });
+  }
+  // Loop until no more spintax
+  let prev = '';
+  let result = text;
+  while (result !== prev) { prev = result; result = resolve(result); }
+  return result;
+}
+
+function mergeEmail(template, contact, hook, track) {
+  const seed = spinHash((contact.company || '') + (contact.firstName || ''));
+  let text = applySpintax(template, seed);
+  text = text
+    .replace(/\[FIRST_NAME\]/g, contact.firstName || contact.lastName || 'there')
+    .replace(/\[LAST_NAME\]/g, contact.lastName || '')
+    .replace(/\[COMPANY\]/g, contact.company || '')
+    .replace(/\[HOOK\]/g, hook || '')
+    .replace(/\[TRACK\]/g, track || '');
+  return text;
+}
+
+function loadEmailTemplate() {
+  const subj = document.getElementById('emailSubject');
+  const body = document.getElementById('emailBody');
+  if (subj) subj.value = emailTemplate.subject || '';
+  if (body) body.value = emailTemplate.body || '';
+}
+
+async function saveEmailTemplate() {
+  emailTemplate.subject = document.getElementById('emailSubject').value;
+  emailTemplate.body = document.getElementById('emailBody').value;
+  try {
+    await window.storage.set('email_template', JSON.stringify(emailTemplate));
+  } catch(e) {}
+  const s = document.getElementById('emailSaved');
+  s.style.display = 'inline';
+  setTimeout(() => s.style.display = 'none', 2000);
+}
+
+function previewSampleEmail() {
+  if (!emailTemplate.body && !document.getElementById('emailBody').value) {
+    showAlert('Enter an email template first.');
+    return;
+  }
+  // Use live textarea values for preview
+  const subj = document.getElementById('emailSubject').value;
+  const body = document.getElementById('emailBody').value;
+  const sampleContact = { firstName: 'Henry', lastName: 'Hernandez', company: 'Veteran Fire Protection' };
+  const sampleHook = 'I noticed that Veteran Fire Protection was founded by a U.S. Army veteran — as a Ranger-qualified Infantry Officer myself, that shared background stood out immediately.';
+  const mergedSubj = mergeEmail(subj, sampleContact, sampleHook, 'Personal Outreach');
+  const mergedBody = mergeEmail(body, sampleContact, sampleHook, 'Personal Outreach');
+  document.getElementById('previewSubject').textContent = mergedSubj;
+  document.getElementById('previewBody').textContent = mergedBody;
+  document.getElementById('emailPreviewBox').style.display = 'block';
+}
+
+function getFullEmail(contact, result, index) {
+  if (!emailTemplate.subject && !emailTemplate.body) return null;
+  const hook = hookEdits[index] || result.hook || '';
+  const track = overrides[index] ? 'Personal Outreach' : (result.track || '');
+  return {
+    subject: mergeEmail(emailTemplate.subject, contact, hook, track),
+    body: mergeEmail(emailTemplate.body, contact, hook, track)
+  };
+}
+
+// Load email template from storage on init
+(async () => {
+  try {
+    const et = await window.storage.get('email_template');
+    if (et && et.value) emailTemplate = JSON.parse(et.value);
+  } catch(e) {}
+})();
 </script>
 
 </div><!-- end page-screener -->
@@ -2433,6 +2726,47 @@ async function saveCriteria() {
     </div>
   </div><!-- end page-criteria -->
 
-</div><!-- end container -->
+  <div id="page-email" class="page">
+    <div style="max-width:860px;margin:32px auto;padding:0 24px">
+      <div style="margin-bottom:28px">
+        <h2 style="font-size:18px;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-bottom:6px">Email Template</h2>
+        <p style="font-size:12px;color:var(--text-muted);line-height:1.6">Write your outreach template below. Use <strong style="color:var(--text)">[FIRST_NAME]</strong>, <strong style="color:var(--text)">[COMPANY]</strong>, and <strong style="color:var(--text)">[HOOK]</strong> as placeholders. Use <strong style="color:var(--gold)">{option1|option2|option3}</strong> for spintax — same contact always gets the same variation.</p>
+      </div>
+
+      <div style="margin-bottom:20px">
+        <label style="display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Subject Line</label>
+        <input id="emailSubject" type="text" placeholder="{Quick question|A thought|Reaching out} about [COMPANY]" style="width:100%;background:var(--dark-3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:10px 14px;box-sizing:border-box;">
+      </div>
+
+      <div style="margin-bottom:20px">
+        <label style="display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Email Body</label>
+        <textarea id="emailBody" rows="16" placeholder="Hi [FIRST_NAME],&#10;&#10;[HOOK]&#10;&#10;I'm Steven Pavlov — I'm looking to acquire one exceptional company to operate long-term as a steward, not a financial engineer.&#10;&#10;Would you be open to a brief conversation?&#10;&#10;Best,&#10;Steven" style="width:100%;background:var(--dark-3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:12px 14px;box-sizing:border-box;resize:vertical;line-height:1.7"></textarea>
+      </div>
+
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:32px">
+        <button onclick="saveEmailTemplate()" style="background:var(--gold);color:#1a1a1a;border:none;border-radius:6px;padding:10px 22px;font-weight:700;font-size:13px;cursor:pointer;letter-spacing:0.5px">&#10003; Save Template</button>
+        <button onclick="previewSampleEmail()" style="background:var(--dark-3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:10px 22px;font-size:13px;cursor:pointer">&#128065; Preview with Sample</button>
+        <span id="emailSaved" style="font-size:12px;color:var(--green);display:none">&#10003; Saved</span>
+      </div>
+
+      <div id="emailPreviewBox" style="display:none;background:var(--dark-3);border:1px solid var(--border);border-radius:8px;padding:20px 24px">
+        <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px">Preview</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Subject: <span id="previewSubject" style="color:var(--text)"></span></div>
+        <div style="border-top:1px solid var(--border);margin:12px 0"></div>
+        <div id="previewBody" style="font-size:13px;color:var(--text);line-height:1.8;white-space:pre-wrap"></div>
+      </div>
+
+      <div style="margin-top:40px;padding-top:24px;border-top:1px solid var(--border)">
+        <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px">Spintax Reference</div>
+        <div style="font-size:12px;color:var(--text-muted);line-height:2">
+          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">{Hi|Hello|Good morning}</code> — picks one per contact, consistent<br>
+          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">[FIRST_NAME]</code> — owner first name<br>
+          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">[COMPANY]</code> — company name<br>
+          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">[HOOK]</code> — AI-generated personal connection sentence<br>
+          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">[TRACK]</code> — Personal Outreach or Standard Sequence
+        </div>
+      </div>
+    </div>
+  </div><!-- end page-email -->
 </body>
 </html>
