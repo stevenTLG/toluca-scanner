@@ -205,10 +205,10 @@
     <p id="headerDesc">Loading contacts...</p>
   </header>
   <div class="page-nav">
-    <button class="page-tab active" id="tab-screener" onclick="showPage('screener')">&#9646; Screener</button>
-    <button class="page-tab" id="tab-criteria" onclick="showPage('criteria')">&#9881; Criteria &amp; Weights</button>
-    <button class="page-tab" id="tab-email" onclick="showPage('email')">&#9993; Email Template</button>
-    <button class="page-tab" id="tab-history" onclick="showPage('history')">&#128197; Batch History</button>
+    <button class="page-tab active" id="tab-screener" onclick="if(typeof showPage==='function')showPage('screener')">&#9646; Screener</button>
+    <button class="page-tab" id="tab-criteria" onclick="if(typeof showPage==='function')showPage('criteria')">&#9881; Criteria &amp; Weights</button>
+    <button class="page-tab" id="tab-email" onclick="if(typeof showPage==='function')showPage('email')">&#9993; Email Template</button>
+    <button class="page-tab" id="tab-history" onclick="if(typeof showPage==='function')showPage('history')">&#128197; Batch History</button>
   </div>
   <div id="page-screener" class="page active">
 
@@ -859,8 +859,14 @@ const urlParams = new URLSearchParams(window.location.search);
 const BATCH_ID = urlParams.get('batch') || '';
 
 async function loadBatchFromHubSpot(batchId) {
-  document.getElementById('headerDesc').textContent = `Loading batch ${batchId} from HubSpot...`;
+  document.getElementById('headerDesc').textContent = `Loading ${batchId}...`;
   document.getElementById('statTotal').textContent = '...';
+  // Show loading skeleton in table
+  const tbody = document.getElementById('contacts-tbody');
+  if (tbody) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:48px 0;color:var(--text-muted);font-size:13px;letter-spacing:1px">' +
+      '<div style="margin-bottom:10px;font-size:20px">⏳</div>Loading contacts from HubSpot...</td></tr>';
+  }
   try {
     const resp = await fetch(`/api/batch-contacts?batch_id=${encodeURIComponent(batchId)}`);
     const data = await resp.json();
@@ -1974,23 +1980,109 @@ async function confirmOverride() {
 }
 function removeOverride(index) {
   overrides[index] = false;
+  if (results[index]) delete results[index]._override_note;
   renderRow(index);
   saveOverrides();
+  // Auto-save removal to HubSpot
+  const c = allContacts[index];
+  const r = results[index];
+  if (c && c.hubspot_id && r && r.status === 'done') {
+    autoSaveToHubSpot(c.hubspot_id, {
+      track:         r.track,
+      score:         r.score,
+      hook:          hookEdits[index] !== undefined ? hookEdits[index] : (r.hook || ''),
+      recommendation: r.recommendation || '',
+      track_reason:  r.track_reason || '',
+      connections:   r.connections || [],
+      override:      false,
+      override_note: '',
+      notes:         notes[index] || ''
+    });
+  }
 }
 
-// ─── AUTO-SAVE TO HUBSPOT ────────────────────────────────────
-async function autoSaveToHubSpot(hubspot_id, result) {
+// ─── DEBOUNCED AUTO-SAVE TO HUBSPOT ─────────────────────────
+// Per-contact 3-second debounce — multiple edits to same contact
+// collapse into one HubSpot write. beforeunload flushes pending.
+
+const _pendingSaves = {};   // hubspot_id → { timer, payload }
+const _DEBOUNCE_MS  = 3000; // 3 seconds
+
+function autoSaveToHubSpot(hubspot_id, result) {
+  // Cancel any existing timer for this contact
+  if (_pendingSaves[hubspot_id]) {
+    clearTimeout(_pendingSaves[hubspot_id].timer);
+  }
+  // Store latest payload
+  _pendingSaves[hubspot_id] = {
+    payload: { hubspot_id, ...result },
+    timer: setTimeout(() => {
+      _flushContact(hubspot_id);
+    }, _DEBOUNCE_MS)
+  };
+  _showSaveIndicator();
+}
+
+async function _flushContact(hubspot_id) {
+  const pending = _pendingSaves[hubspot_id];
+  if (!pending) return;
+  delete _pendingSaves[hubspot_id];
   try {
     await fetch('/api/write-contact', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hubspot_id, ...result })
+      body: JSON.stringify(pending.payload)
     });
   } catch(e) {
-    // Silent fail — don't interrupt user
-    console.warn('Auto-save failed:', e.message);
+    console.warn('Auto-save failed for', hubspot_id, e.message);
   }
+  if (Object.keys(_pendingSaves).length === 0) _hideSaveIndicator();
 }
+
+async function _flushAllPending() {
+  const ids = Object.keys(_pendingSaves);
+  if (!ids.length) return;
+  // Cancel all timers and flush immediately
+  const flushes = ids.map(id => {
+    clearTimeout(_pendingSaves[id].timer);
+    return _flushContact(id);
+  });
+  await Promise.all(flushes);
+}
+
+// Save indicator — subtle "Saving..." text in batch action bar
+function _showSaveIndicator() {
+  let el = document.getElementById('hs-save-indicator');
+  if (!el) {
+    const bar = document.getElementById('batch-action-bar');
+    if (!bar) return;
+    el = document.createElement('span');
+    el.id = 'hs-save-indicator';
+    el.style.cssText = 'font-size:10px;color:var(--text-muted);letter-spacing:0.5px;opacity:0.7';
+    bar.appendChild(el);
+  }
+  el.textContent = '● Saving...';
+}
+function _hideSaveIndicator() {
+  const el = document.getElementById('hs-save-indicator');
+  if (!el) return;
+  el.textContent = '✓ Saved';
+  setTimeout(() => { if(el) el.textContent = ''; }, 2000);
+}
+
+// Flush all pending saves before tab closes
+window.addEventListener('beforeunload', (e) => {
+  const ids = Object.keys(_pendingSaves);
+  if (!ids.length) return;
+  // Cancel timers and fire synchronous beacons for each pending contact
+  ids.forEach(id => {
+    clearTimeout(_pendingSaves[id].timer);
+    const payload = JSON.stringify(_pendingSaves[id].payload);
+    // Use sendBeacon for reliable fire-and-forget on page close
+    navigator.sendBeacon('/api/write-contact', new Blob([payload], { type: 'application/json' }));
+    delete _pendingSaves[id];
+  });
+});
 
 // ─── INLINE HOOK EDIT ────────────────────────────────────────
 function startHookEdit(index) {
@@ -2036,6 +2128,22 @@ async function saveNote(index) {
   notes[index] = ta.value.trim();
   await saveNotes();
   renderRow(index);
+  // Auto-save note to HubSpot with debounce
+  const c = allContacts[index];
+  const r = results[index];
+  if (c && c.hubspot_id && r && r.status === 'done') {
+    autoSaveToHubSpot(c.hubspot_id, {
+      track:         overrides[index] ? (overrides[index] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track,
+      score:         r.score,
+      hook:          hookEdits[index] !== undefined ? hookEdits[index] : (r.hook || ''),
+      recommendation: r.recommendation || '',
+      track_reason:  r.track_reason || '',
+      connections:   r.connections || [],
+      override:      !!overrides[index],
+      override_note: r._override_note || '',
+      notes:         notes[index]
+    });
+  }
 }
 
 // ─── BUILD ROW HTML ──────────────────────────────────────────
