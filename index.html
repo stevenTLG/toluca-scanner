@@ -215,7 +215,20 @@
   <div class="controls">
     <div class="controls-left">
       <h2 id="controlTitle">Ready</h2>
-      <p id="controlDesc">Click Run Screener to analyze all contacts</p>
+      <p id="controlDesc">Click Run Screener — the server processes all contacts in the background. You can close this tab.</p>
+      <div id="server-progress" style="display:none;margin-top:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span id="server-progress-label" style="font-size:11px;color:var(--text-muted)">Starting...</span>
+          <span id="server-progress-pct" style="font-size:11px;color:var(--gold);font-weight:600">0%</span>
+        </div>
+        <div style="height:4px;background:var(--dark-3);border-radius:2px;overflow:hidden">
+          <div id="server-progress-fill" style="height:100%;background:var(--gold);width:0%;transition:width 0.5s ease;border-radius:2px"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px">
+          <span id="server-progress-contact" style="font-size:10px;color:#555;font-style:italic"></span>
+          <span id="server-progress-eta" style="font-size:10px;color:#555"></span>
+        </div>
+      </div>
       <p class="concurrency-note" id="concurrencyNote"></p>
       <div class="progress-bar" id="progressBar" style="display:none">
         <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
@@ -232,7 +245,7 @@
     </div>
     <button class="btn btn-secondary" id="btnStop" style="display:none" onclick="stopProcessing()">Pause</button>
     <button class="btn btn-secondary" onclick="showApiKeyModal('Enter or update your Anthropic API key.')" style="font-size:11px;padding:10px 14px" title="Set API Key">🔑 API Key</button>
-    <button class="btn btn-primary" id="btnRun" onclick="startProcessing()">Run Screener</button>
+    <button class="btn btn-primary" id="btnRun" onclick="startServerScreening()">▶ Run Screener</button>
   </div>
 
   <div class="stats">
@@ -364,6 +377,193 @@
 "STEVEN PAVLOV \u2014 BACKGROUND FOR CONNECTION ANALYSIS\n- Born in former Soviet Union, immigrated to US in 1994 as child with single mother\n- Mother rebuilt her life in the US: worked full time while earning bachelor's and master's degrees\n- Lives in Sacramento, CA with wife and young daughter\n- CFO, California Department of Developmental Services ($19B agency, 80-person team)\n- UC Berkeley Haas MBA (Dec 2025), UCLA BA Political Science & History\n- U.S. Army Infantry Officer, Ranger-qualified, California Army National Guard (2012-present)\n- Battalion Operations Officer; commanded 130-soldier infantry company (ranked 3rd of 34 captains)\n- Deployed to Ukraine 2016 as U.S. Embassy Liaison Officer\n- California Senate Fellow \u2014 Legislative Aide to State Senator Norma Torres\n- Avid marathon runner, managed local political campaigns, civic engagement\n- Founding Toluca Lake Group to acquire ONE exceptional company long-term\n- Wants to be a steward of the business and employees, not a financial engineer\n\nKEY CONNECTION TRIGGERS (things that warrant a personal email vs standard sequence):\n1. Immigrant background \u2014 especially Eastern Europe, former Soviet states, or any first-gen immigrant story\n2. Military veteran \u2014 any branch, especially Army, infantry, combat arms, special operations\n3. Single parent family / bootstrapped personal upbringing\n4. California native with deep roots, especially Sacramento, Antelope Valley, or San Fernando Valley\n5. UCLA or UC Berkeley alumni\n6. Government or public sector background before entrepreneurship\n7. Started business from scratch with very limited resources\n8. Business serves government or military clients (especially relevant given Steven's background)\n9. Owner approaching retirement age with no clear family succession plan\n10. First-generation immigrant who built the business from nothing\n11. Sacramento area business owner (shared community connection)\n12. Endurance athlete \u2014 marathon running, cycling, triathlon\n13. Civic engagement, political involvement, community leadership\n14. Strong employee culture, loyal workforce, long-tenured staff\n15. Business in sectors Steven has direct government oversight experience (disability services, human services, developmental services)"
 </script>
 <script>
+// ─── SERVER-SIDE SCREENING ───────────────────────────────────────────────────
+let activeJobId   = null;
+let pollInterval  = null;
+
+function buildCriteriaPayload() {
+  // Collect current criteria to send to the server
+  const profile = {
+    background: (document.getElementById('profileBackground') || {}).value || profileCache.background || '',
+    location:   (document.getElementById('profileLocation')   || {}).value || profileCache.location   || '',
+    military:   (document.getElementById('profileMilitary')   || {}).value || profileCache.military   || '',
+    education:  (document.getElementById('profileEducation')  || {}).value || profileCache.education  || '',
+    other:      (document.getElementById('profileOther')      || {}).value || profileCache.other       || '',
+  };
+
+  const weights = getAllTriggers()
+    .filter(t => t.label && t.label.trim())
+    .map(t => ({ label: t.label, weight: getTriggerWeight(t.id) }));
+
+  const search2Terms = getSearch2Terms ? getSearch2Terms() : '';
+
+  return {
+    threshold:    getCriteriaThreshold(),
+    profile,
+    weights,
+    feedback:     feedbackItems || [],
+    search2_terms: search2Terms
+  };
+}
+
+async function startServerScreening() {
+  if (!BATCH_ID) {
+    await showAlert('No batch loaded. Open the scanner from a batch in Toluca Tools.');
+    return;
+  }
+  if (activeJobId) {
+    await showAlert('A screening job is already running for this batch.');
+    return;
+  }
+
+  const btn = document.getElementById('btnRun');
+  btn.disabled = true;
+  btn.textContent = 'Starting...';
+  document.getElementById('server-progress').style.display = 'block';
+  document.getElementById('controlDesc').textContent = 'Server is processing contacts — you can close this tab safely.';
+
+  try {
+    const resp = await fetch('/api/screen-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ batch_id: BATCH_ID, criteria: buildCriteriaPayload() })
+    });
+    const data = await resp.json();
+
+    if (!resp.ok || data.error) {
+      btn.disabled = false;
+      btn.textContent = '▶ Run Screener';
+      await showAlert(data.error || 'Failed to start screening job');
+      return;
+    }
+
+    activeJobId = data.job_id;
+
+    // Save job ID to storage so we can reconnect after page reload
+    try {
+      await window.storage.set('active_job_' + BATCH_ID, JSON.stringify({
+        job_id: activeJobId,
+        started: new Date().toISOString(),
+        total: data.total
+      }));
+    } catch(e) {}
+
+    btn.textContent = '⏳ Screening...';
+    document.getElementById('server-progress-label').textContent =
+      `${data.already_screened} already screened — ${data.total} to process`;
+
+    startPolling();
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '▶ Run Screener';
+    await showAlert('Network error: ' + e.message);
+  }
+}
+
+function startPolling() {
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(pollJobStatus, 3000);
+  pollJobStatus(); // immediate first poll
+}
+
+function stopPolling() {
+  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+}
+
+async function pollJobStatus() {
+  if (!activeJobId) return;
+  try {
+    const resp = await fetch(`/api/screen-status/${activeJobId}`);
+    if (!resp.ok) return;
+    const job = await resp.json();
+    updateProgressUI(job);
+
+    if (job.done) {
+      stopPolling();
+      onScreeningComplete(job);
+    }
+  } catch(e) {}
+}
+
+function updateProgressUI(job) {
+  const pct   = job.pct || 0;
+  const label = `${job.processed} of ${job.total} screened`;
+  document.getElementById('server-progress-fill').style.width  = pct + '%';
+  document.getElementById('server-progress-pct').textContent   = pct + '%';
+  document.getElementById('server-progress-label').textContent = label;
+
+  if (job.current_contact) {
+    document.getElementById('server-progress-contact').textContent = '→ ' + job.current_contact;
+  }
+
+  if (job.eta_s && !job.done) {
+    const mins = Math.floor(job.eta_s / 60);
+    const secs = job.eta_s % 60;
+    document.getElementById('server-progress-eta').textContent =
+      mins > 0 ? `~${mins}m ${secs}s remaining` : `~${secs}s remaining`;
+  }
+}
+
+async function onScreeningComplete(job) {
+  const btn = document.getElementById('btnRun');
+  btn.disabled = false;
+  btn.textContent = '▶ Run Screener';
+
+  document.getElementById('server-progress-contact').textContent = '';
+  document.getElementById('server-progress-eta').textContent = '✓ Complete';
+  document.getElementById('server-progress-pct').textContent = '100%';
+  document.getElementById('server-progress-fill').style.width = '100%';
+  document.getElementById('controlDesc').textContent =
+    `Screening complete — ${job.processed} contacts scored. Reloading results from HubSpot...`;
+
+  activeJobId = null;
+  try { await window.storage.delete('active_job_' + BATCH_ID); } catch(e) {}
+
+  // Reload batch from HubSpot to get all freshly-written results
+  await new Promise(r => setTimeout(r, 1500));
+  await loadBatchFromHubSpot(BATCH_ID);
+
+  if (job.error_count > 0) {
+    document.getElementById('controlDesc').textContent =
+      `Done — ${job.processed} screened, ${job.error_count} errors. Check console for details.`;
+  }
+}
+
+// On page load: reconnect to any running job for this batch
+async function reconnectJob() {
+  if (!BATCH_ID) return;
+  try {
+    const stored = await window.storage.get('active_job_' + BATCH_ID).catch(()=>null);
+    if (!stored || !stored.value) return;
+    const saved = JSON.parse(stored.value);
+    if (!saved.job_id) return;
+
+    // Check if job is still running
+    const resp = await fetch(`/api/screen-status/${saved.job_id}`);
+    if (!resp.ok) return;
+    const job = await resp.json();
+
+    if (job.done) {
+      // Job finished while we were away — reload results
+      await window.storage.delete('active_job_' + BATCH_ID).catch(()=>{});
+      document.getElementById('controlDesc').textContent = 'Previous screening job completed. Reloading...';
+      await new Promise(r => setTimeout(r, 800));
+      await loadBatchFromHubSpot(BATCH_ID);
+      return;
+    }
+
+    // Job still running — reconnect
+    activeJobId = saved.job_id;
+    const btn = document.getElementById('btnRun');
+    btn.disabled = true;
+    btn.textContent = '⏳ Screening...';
+    document.getElementById('server-progress').style.display = 'block';
+    document.getElementById('controlDesc').textContent = 'Reconnected to running screening job — you can close this tab.';
+    updateProgressUI(job);
+    startPolling();
+  } catch(e) {}
+}
+
 // ─── BATCH HISTORY ───────────────────────────────────────────────────────────
 async function saveBatchToHistory(batchId, total, prePopulated) {
   try {
@@ -702,6 +902,9 @@ async function loadBatchFromHubSpot(batchId) {
 
     // Track batch in history
     saveBatchToHistory(batchId, allContacts.length, prePopulated);
+
+    // Reconnect to any running screening job
+    setTimeout(reconnectJob, 500);
   } catch(e) {
     document.getElementById('headerDesc').textContent = `Failed to load batch: ${e.message}`;
   }
@@ -1752,11 +1955,41 @@ async function confirmOverride() {
   renderRow(modalIndex);
   await saveOverrides();
   await saveNotes();
+  // Auto-save override to HubSpot immediately
+  const c = allContacts[modalIndex];
+  const r = results[modalIndex];
+  if (c && c.hubspot_id && r) {
+    autoSaveToHubSpot(c.hubspot_id, {
+      track:         overrides[modalIndex] ? (overrides[modalIndex] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track,
+      score:         r.score,
+      hook:          hookEdits[modalIndex] !== undefined ? hookEdits[modalIndex] : (r.hook || ''),
+      recommendation: r.recommendation || '',
+      track_reason:  r.track_reason || '',
+      connections:   r.connections || [],
+      override:      true,
+      override_note: noteVal,
+      notes:         notes[modalIndex] || ''
+    });
+  }
 }
 function removeOverride(index) {
   overrides[index] = false;
   renderRow(index);
   saveOverrides();
+}
+
+// ─── AUTO-SAVE TO HUBSPOT ────────────────────────────────────
+async function autoSaveToHubSpot(hubspot_id, result) {
+  try {
+    await fetch('/api/write-contact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hubspot_id, ...result })
+    });
+  } catch(e) {
+    // Silent fail — don't interrupt user
+    console.warn('Auto-save failed:', e.message);
+  }
 }
 
 // ─── INLINE HOOK EDIT ────────────────────────────────────────
@@ -1772,6 +2005,22 @@ async function saveHook(index) {
   hookEdits[index] = ta.value.trim();
   await saveHooks();
   renderRow(index);
+  // Auto-save hook edit to HubSpot immediately
+  const c = allContacts[index];
+  const r = results[index];
+  if (c && c.hubspot_id && r && r.status === 'done') {
+    autoSaveToHubSpot(c.hubspot_id, {
+      track:        overrides[index] ? (overrides[index] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track,
+      score:        r.score,
+      hook:         hookEdits[index],
+      recommendation: r.recommendation || '',
+      track_reason: r.track_reason || '',
+      connections:  r.connections || [],
+      override:     !!overrides[index],
+      override_note: r._override_note || '',
+      notes:        notes[index] || ''
+    });
+  }
 }
 
 // ─── INLINE NOTES EDIT ───────────────────────────────────────
