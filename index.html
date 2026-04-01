@@ -208,6 +208,7 @@
     <button class="page-tab active" id="tab-screener" onclick="showPage('screener')">&#9646; Screener</button>
     <button class="page-tab" id="tab-criteria" onclick="showPage('criteria')">&#9881; Criteria &amp; Weights</button>
     <button class="page-tab" id="tab-email" onclick="showPage('email')">&#9993; Email Template</button>
+    <button class="page-tab" id="tab-history" onclick="showPage('history')">&#128197; Batch History</button>
   </div>
   <div id="page-screener" class="page active">
 
@@ -363,6 +364,94 @@
 "STEVEN PAVLOV \u2014 BACKGROUND FOR CONNECTION ANALYSIS\n- Born in former Soviet Union, immigrated to US in 1994 as child with single mother\n- Mother rebuilt her life in the US: worked full time while earning bachelor's and master's degrees\n- Lives in Sacramento, CA with wife and young daughter\n- CFO, California Department of Developmental Services ($19B agency, 80-person team)\n- UC Berkeley Haas MBA (Dec 2025), UCLA BA Political Science & History\n- U.S. Army Infantry Officer, Ranger-qualified, California Army National Guard (2012-present)\n- Battalion Operations Officer; commanded 130-soldier infantry company (ranked 3rd of 34 captains)\n- Deployed to Ukraine 2016 as U.S. Embassy Liaison Officer\n- California Senate Fellow \u2014 Legislative Aide to State Senator Norma Torres\n- Avid marathon runner, managed local political campaigns, civic engagement\n- Founding Toluca Lake Group to acquire ONE exceptional company long-term\n- Wants to be a steward of the business and employees, not a financial engineer\n\nKEY CONNECTION TRIGGERS (things that warrant a personal email vs standard sequence):\n1. Immigrant background \u2014 especially Eastern Europe, former Soviet states, or any first-gen immigrant story\n2. Military veteran \u2014 any branch, especially Army, infantry, combat arms, special operations\n3. Single parent family / bootstrapped personal upbringing\n4. California native with deep roots, especially Sacramento, Antelope Valley, or San Fernando Valley\n5. UCLA or UC Berkeley alumni\n6. Government or public sector background before entrepreneurship\n7. Started business from scratch with very limited resources\n8. Business serves government or military clients (especially relevant given Steven's background)\n9. Owner approaching retirement age with no clear family succession plan\n10. First-generation immigrant who built the business from nothing\n11. Sacramento area business owner (shared community connection)\n12. Endurance athlete \u2014 marathon running, cycling, triathlon\n13. Civic engagement, political involvement, community leadership\n14. Strong employee culture, loyal workforce, long-tenured staff\n15. Business in sectors Steven has direct government oversight experience (disability services, human services, developmental services)"
 </script>
 <script>
+// ─── BATCH HISTORY ───────────────────────────────────────────────────────────
+async function saveBatchToHistory(batchId, total, prePopulated) {
+  try {
+    const existing = await window.storage.get('batch_history').catch(()=>null);
+    let history = [];
+    if (existing && existing.value) history = JSON.parse(existing.value);
+    // Update or insert
+    const idx = history.findIndex(b => b.batchId === batchId);
+    const entry = {
+      batchId,
+      total,
+      prePopulated,
+      lastOpened: new Date().toISOString()
+    };
+    if (idx >= 0) history[idx] = { ...history[idx], ...entry };
+    else history.unshift(entry);
+    // Keep last 50 batches
+    history = history.slice(0, 50);
+    await window.storage.set('batch_history', JSON.stringify(history));
+  } catch(e) {}
+}
+
+async function updateBatchHistoryStatus(batchId, screened, personal, standard, pushed) {
+  try {
+    const existing = await window.storage.get('batch_history').catch(()=>null);
+    let history = [];
+    if (existing && existing.value) history = JSON.parse(existing.value);
+    const idx = history.findIndex(b => b.batchId === batchId);
+    if (idx >= 0) {
+      history[idx].screened = screened;
+      history[idx].personal = personal;
+      history[idx].standard = standard;
+      if (pushed) history[idx].pushed = true;
+      history[idx].lastUpdated = new Date().toISOString();
+      await window.storage.set('batch_history', JSON.stringify(history));
+    }
+  } catch(e) {}
+}
+
+async function renderBatchHistory() {
+  const el = document.getElementById('batch-history-list');
+  if (!el) return;
+  try {
+    const data = await window.storage.get('batch_history').catch(()=>null);
+    if (!data || !data.value) {
+      el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:20px 0">No batches loaded yet. Open a batch from Toluca Tools to get started.</div>';
+      return;
+    }
+    const history = JSON.parse(data.value);
+    if (!history.length) {
+      el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:20px 0">No batches loaded yet.</div>';
+      return;
+    }
+    el.innerHTML = history.map(b => {
+      const date = b.lastOpened ? new Date(b.lastOpened).toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) : '';
+      let statusHtml = '';
+      if (b.pushed) {
+        statusHtml = `<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:rgba(76,175,125,0.15);color:var(--green);border:1px solid rgba(76,175,125,0.3);letter-spacing:0.5px">Pushed</span>`;
+      } else if (b.screened) {
+        statusHtml = `<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:rgba(201,168,76,0.12);color:var(--gold);border:1px solid rgba(201,168,76,0.3);letter-spacing:0.5px">Screened</span>`;
+      } else if (b.prePopulated > 0) {
+        statusHtml = `<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:rgba(136,136,136,0.15);color:var(--text-muted);border:1px solid var(--border);letter-spacing:0.5px">Partial</span>`;
+      }
+      const screenerInfo = b.screened ? `${b.screened} screened — ${b.personal || 0} personal, ${b.standard || 0} standard` : 
+                           b.prePopulated > 0 ? `${b.prePopulated} of ${b.total} previously screened` :
+                           `${b.total} contacts`;
+      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border);gap:12px">
+        <div style="flex:1;min-width:0">
+          <div style="font-family:monospace;font-size:12px;color:var(--gold);font-weight:600;margin-bottom:3px">${b.batchId}</div>
+          <div style="font-size:11px;color:var(--text-muted)">${screenerInfo}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+          ${statusHtml}
+          <div style="font-size:11px;color:#555">${date}</div>
+          <a href="/?batch=${encodeURIComponent(b.batchId)}" 
+             style="font-size:11px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);text-decoration:none;transition:all .2s"
+             onmouseover="this.style.borderColor='var(--gold)';this.style.color='var(--gold)'"
+             onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">
+            Open →
+          </a>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--red)">Error loading history.</div>';
+  }
+}
+
 // ─── DOM CACHE  -  must be first, everything uses it ───────────
 const _domIds = ['controlTitle','controlDesc','concurrencyNote','btnRun','btnStop',
   'progressBar','progressFill','progressLabel','timingBar','rateLimitBanner',
@@ -584,11 +673,35 @@ async function loadBatchFromHubSpot(batchId) {
     overrides = {};
     notes = {};
     hookEdits = {};
+
+    // Pre-populate results from existing HubSpot scanner properties
+    let prePopulated = 0;
+    allContacts.forEach((c, i) => {
+      if (c.existing_track && c.existing_score) {
+        results[i] = {
+          status:      'done',
+          track:       c.existing_track,
+          score:       parseFloat(c.existing_score) || 0,
+          hook:        c.existing_hook || '',
+          recommendation: '',
+          connections: [],
+          industryCluster: '',
+          _preloaded:  true
+        };
+        if (c.existing_hook) hookEdits[i] = c.existing_hook;
+        prePopulated++;
+      }
+    });
+
     document.getElementById('statTotal').textContent = allContacts.length;
-    document.getElementById('headerDesc').textContent = `${batchId} — ${allContacts.length} contacts from HubSpot`;
+    const preMsg = prePopulated > 0 ? ` — ${prePopulated} previously screened` : '';
+    document.getElementById('headerDesc').textContent = `${batchId} — ${allContacts.length} contacts${preMsg}`;
     renderTable();
     updateStats();
     showBatchControls(batchId);
+
+    // Track batch in history
+    saveBatchToHistory(batchId, allContacts.length, prePopulated);
   } catch(e) {
     document.getElementById('headerDesc').textContent = `Failed to load batch: ${e.message}`;
   }
@@ -631,8 +744,11 @@ async function writeResultsToHubSpot() {
         score:          r.score,
         hook:           hookEdits[i] !== undefined ? hookEdits[i] : (r.hook || ''),
         recommendation: r.recommendation || '',
+        track_reason:   r.track_reason || '',
         connections:    r.connections || [],
-        override:       !!overrides[i]
+        override:       !!overrides[i],
+        override_note:  overrides[i] ? (r._override_note || '') : '',
+        notes:          notes[i] || ''
       };
     })
     .filter(Boolean);
@@ -648,6 +764,23 @@ async function writeResultsToHubSpot() {
     });
     const data = await resp.json();
     btn.textContent = `✓ ${data.updated} written`;
+    if (BATCH_ID) {
+      try {
+        const screened = Object.values(results).filter(r => r && r.status === 'done').length;
+        const personal = allContacts.filter((c, i) => {
+          const r = results[i];
+          if (!r || r.status !== 'done') return false;
+          const track = overrides[i] ? (overrides[i] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track;
+          return track === 'Personal Outreach';
+        }).length;
+        const standard = screened - personal;
+        await window.storage.set('screener_status_' + BATCH_ID, JSON.stringify({
+          status: 'screened', screened, total: allContacts.length, personal, standard,
+          timestamp: new Date().toISOString()
+        }));
+        await updateBatchHistoryStatus(BATCH_ID, screened, personal, standard, false);
+      } catch(e) {}
+    }
     setTimeout(() => { btn.textContent = '↑ Write to HubSpot'; btn.disabled = false; }, 3000);
   } catch(e) {
     btn.textContent = 'Error'; btn.disabled = false;
@@ -657,10 +790,26 @@ async function writeResultsToHubSpot() {
 
 async function pushToReplyIo() {
   const btn = document.getElementById('btn-push-reply');
-  const personalSeqId = prompt('Personal Outreach sequence ID (Reply.io):');
-  if (!personalSeqId) return;
-  const standardSeqId = prompt('Standard Sequence sequence ID (Reply.io):');
-  if (!standardSeqId) return;
+
+  // Load stored sequence IDs
+  let personalSeqId = '', standardSeqId = '';
+  try {
+    const seqData = await window.storage.get('replyio_sequences').catch(()=>null);
+    if (seqData && seqData.value) {
+      const seqs = JSON.parse(seqData.value);
+      personalSeqId = seqs.personal || '';
+      standardSeqId = seqs.standard || '';
+    }
+  } catch(e) {}
+
+  // Fall back to prompt if not configured
+  if (!personalSeqId || !standardSeqId) {
+    const msg = 'Reply.io sequence IDs not configured.\n\nGo to Criteria & Weights tab → Reply.io Sequences → enter your IDs and Save All.\n\nEnter Personal Outreach sequence ID now (or cancel):';
+    personalSeqId = prompt(msg);
+    if (!personalSeqId) return;
+    standardSeqId = prompt('Standard Sequence sequence ID:');
+    if (!standardSeqId) return;
+  }
 
   const contacts = allContacts
     .map((c, i) => {
@@ -691,8 +840,34 @@ async function pushToReplyIo() {
       })
     });
     const data = await resp.json();
-    btn.textContent = `✓ ${data.enrolled} enrolled`;
-    setTimeout(() => { btn.textContent = '→ Push to Reply.io'; btn.disabled = false; }, 3000);
+    if (data.ok) {
+      btn.textContent = `✓ ${data.enrolled} enrolled`;
+      btn.style.background = 'rgba(76,175,125,0.15)';
+      btn.style.color = 'var(--green)';
+      btn.style.borderColor = 'rgba(76,175,125,0.3)';
+      // Mark batch as pushed in storage
+      if (BATCH_ID) {
+        try {
+          const p = contacts.filter(c => c.track === 'Personal Outreach').length;
+          const s = contacts.filter(c => c.track === 'Standard Sequence').length;
+          await window.storage.set('screener_status_' + BATCH_ID, JSON.stringify({
+            status: 'pushed', enrolled: data.enrolled, personal: p, standard: s,
+            timestamp: new Date().toISOString()
+          }));
+          await updateBatchHistoryStatus(BATCH_ID, contacts.length, p, s, true);
+        } catch(e) {}
+      }
+      setTimeout(() => {
+        btn.textContent = '→ Push to Reply.io';
+        btn.style.background = '';
+        btn.style.color = '';
+        btn.style.borderColor = '';
+        btn.disabled = false;
+      }, 4000);
+    } else {
+      btn.textContent = `⚠ ${data.failed} failed`;
+      btn.disabled = false;
+    }
   } catch(e) {
     btn.textContent = 'Error'; btn.disabled = false;
     console.error(e);
@@ -1569,6 +1744,10 @@ async function confirmOverride() {
   overrides[modalIndex] = true;
   const noteVal = document.getElementById('modalNotes').value.trim();
   if (noteVal) notes[modalIndex] = noteVal;
+  // Store override note on the result so it gets written to HubSpot
+  if (results[modalIndex]) {
+    results[modalIndex]._override_note = noteVal;
+  }
   closeModal();
   renderRow(modalIndex);
   await saveOverrides();
@@ -2299,6 +2478,7 @@ function parseCSVRow(line) {
 
 // ─── PAGE NAV ─────────────────────────────────────────────────
 function showPage(name) {
+  if (name === 'history') renderBatchHistory();
   ['screener','criteria','email'].forEach(p => {
     document.getElementById('page-'+p).classList.toggle('active', p===name);
     document.getElementById('tab-'+p).classList.toggle('active', p===name);
@@ -2348,18 +2528,26 @@ let profileCache = { ...PROFILE_DEFAULTS };
 
 (async () => {
   try {
-    const [cw, cf, ct, cc, cp] = await Promise.all([
+    const [cw, cf, ct, cc, cp, rseq] = await Promise.all([
       window.storage.get('criteria_weights').catch(()=>null),
       window.storage.get('criteria_feedback').catch(()=>null),
       window.storage.get('criteria_threshold').catch(()=>null),
       window.storage.get('criteria_custom_triggers').catch(()=>null),
-      window.storage.get('criteria_profile').catch(()=>null)
+      window.storage.get('criteria_profile').catch(()=>null),
+      window.storage.get('replyio_sequences').catch(()=>null)
     ]);
     if (cw && cw.value) criteriaWeights = JSON.parse(cw.value);
     if (cf && cf.value) feedbackItems = JSON.parse(cf.value);
     if (ct && ct.value) criteriaThreshold = parseInt(ct.value) || 40;
     if (cc && cc.value) customTriggers = JSON.parse(cc.value);
     if (cp && cp.value) profileCache = { ...PROFILE_DEFAULTS, ...JSON.parse(cp.value) };
+    if (rseq && rseq.value) {
+      const seqs = JSON.parse(rseq.value);
+      const pEl = document.getElementById('replyio-personal-seq');
+      const sEl = document.getElementById('replyio-standard-seq');
+      if (pEl) pEl.value = seqs.personal || '';
+      if (sEl) sEl.value = seqs.standard || '';
+    }
     document.getElementById('thresholdInput').value = criteriaThreshold;
   } catch(e) {}
 })();
@@ -2539,6 +2727,12 @@ async function saveCriteria() {
     await window.storage.set('criteria_custom_triggers', JSON.stringify(customTriggers));
     await window.storage.set('criteria_profile', JSON.stringify(profileData));
     profileCache = { ...profileData }; // keep cache in sync
+    // Save Reply.io sequence IDs
+    const replyioSeqs = {
+      personal: (document.getElementById('replyio-personal-seq') || {}).value || '',
+      standard: (document.getElementById('replyio-standard-seq') || {}).value || ''
+    };
+    await window.storage.set('replyio_sequences', JSON.stringify(replyioSeqs));
   } catch(e) {}
   const saved = document.getElementById('criteriaSaved');
   saved.style.display = 'inline';
@@ -2711,6 +2905,22 @@ function getFullEmail(contact, result, index) {
         <div class="profile-field"><label>Education</label><input type="text" id="profileEducation"></div>
         <div class="profile-field"><label>Other Key Details</label><textarea id="profileOther"></textarea></div>
       </div>
+
+      <!-- Reply.io Sequences -->
+      <div class="criteria-card" style="grid-column:1/-1">
+        <h3 style="margin-bottom:6px">Reply.io Sequences</h3>
+        <p style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Set your sequence IDs once here — used every time you push to Reply.io. Find these in Reply.io → Sequences → click a sequence → the ID is in the URL.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="profile-field">
+            <label>Personal Outreach Sequence ID</label>
+            <input type="text" id="replyio-personal-seq" placeholder="e.g. 12345" style="font-family:monospace">
+          </div>
+          <div class="profile-field">
+            <label>Standard Sequence Sequence ID</label>
+            <input type="text" id="replyio-standard-seq" placeholder="e.g. 67890" style="font-family:monospace">
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="feedback-box">
@@ -2725,6 +2935,24 @@ function getFullEmail(contact, result, index) {
       </div>
     </div>
   </div><!-- end page-criteria -->
+
+  <div id="page-history" class="page">
+    <div style="max-width:860px;margin:32px auto;padding:0 24px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+        <div>
+          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:2px;margin-bottom:6px">Batch History</div>
+          <div style="font-family:'Playfair Display',serif;font-size:22px;color:var(--gold)">All Screened Batches</div>
+        </div>
+        <button onclick="renderBatchHistory()" style="font-size:11px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-muted);cursor:pointer;font-family:'DM Sans',sans-serif;letter-spacing:0.5px">Refresh</button>
+      </div>
+      <div style="background:var(--dark-2);border-radius:12px;padding:20px 24px;border:1px solid var(--border)">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:16px">Click "Open →" on any batch to reload it into the screener. Previously screened contacts will be pre-populated — only unscreened contacts need to be re-run.</div>
+        <div id="batch-history-list">
+          <div style="font-size:12px;color:var(--text-muted);padding:20px 0">Loading...</div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div id="page-email" class="page">
     <div style="max-width:860px;margin:32px auto;padding:0 24px">
