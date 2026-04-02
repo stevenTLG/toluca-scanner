@@ -69,11 +69,12 @@ def _fetch_contacts(batch_id, full=False):
     props = base_props + extra_props
 
     contacts = []
+    raw_contacts = []
     after = None
     while True:
         payload = {
             'filterGroups': [{'filters': [{'propertyName': 'grata_batch', 'operator': 'EQ', 'value': batch_id}]}],
-            'properties': props, 'limit': 100
+            'properties': props + ['associatedcompanyid'], 'limit': 100
         }
         if after:
             payload['after'] = after
@@ -82,15 +83,40 @@ def _fetch_contacts(batch_id, full=False):
         if not resp.ok:
             raise Exception(f'HubSpot {resp.status_code}: {resp.text[:200]}')
         data = resp.json()
-        for c in data.get('results', []):
+        raw_contacts.extend(data.get('results', []))
+        nxt = data.get('paging', {}).get('next', {}).get('after')
+        if nxt: after = nxt
+        else:   break
+
+    # Batch-fetch company names for all associated companies
+    company_id_to_name = {}
+    co_ids = list(set(
+        c.get('properties', {}).get('associatedcompanyid', '')
+        for c in raw_contacts
+        if c.get('properties', {}).get('associatedcompanyid', '')
+    ))
+    for i in range(0, len(co_ids), 100):
+        batch = co_ids[i:i+100]
+        co_resp = requests.post(f'{HUBSPOT_BASE}/crm/v3/objects/companies/batch/read',
+            headers=hs_headers(),
+            json={'inputs': [{'id': cid} for cid in batch], 'properties': ['name']},
+            timeout=20)
+        if co_resp.ok:
+            for co in co_resp.json().get('results', []):
+                company_id_to_name[co['id']] = co.get('properties', {}).get('name', '')
+
+    for c in raw_contacts:
             p = c.get('properties', {})
             loc = ', '.join(x for x in [p.get('city',''), p.get('state','')] if x)
+            # Use associated company name if contact's own company field is blank
+            co_id = p.get('associatedcompanyid', '')
+            company_name = p.get('company', '') or company_id_to_name.get(co_id, '')
             entry = {
                 'hubspot_id':     c['id'],
                 'firstName':      p.get('firstname', ''),
                 'lastName':       p.get('lastname', ''),
                 'jobTitle':       p.get('jobtitle', ''),
-                'company':        p.get('company', ''),
+                'company':        company_name,
                 'email':          p.get('email', ''),
                 'linkedin':       p.get('hs_linkedinid', ''),
                 'industry':       p.get('industry', ''),
@@ -113,9 +139,6 @@ def _fetch_contacts(batch_id, full=False):
                     'existing_notes':          p.get('scanner_notes', ''),
                 })
             contacts.append(entry)
-        nxt = data.get('paging', {}).get('next', {}).get('after')
-        if nxt: after = nxt
-        else:   break
     return contacts
 
 @app.route('/api/batch-contacts', methods=['GET'])
