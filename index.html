@@ -658,7 +658,17 @@ const _domIds = ['controlTitle','controlDesc','concurrencyNote','btnRun','btnSto
   'avgL1','estRemaining','elapsed','resumeCountdown','delayDisplay','avgTokens',
   'statTotal','statPersonal','statStandard','statProcessed','statOverrides',
   'tableBody'];
-const DOM = Object.fromEntries(_domIds.map(id => [id, document.getElementById(id)]));
+const _rawDOM = Object.fromEntries(_domIds.map(id => [id, document.getElementById(id)]));
+const DOM = new Proxy(_rawDOM, {
+  get(target, prop) {
+    const el = target[prop];
+    if (!el) {
+      // Return a no-op stub so .textContent = x never crashes
+      return { textContent: '', style: {}, disabled: false };
+    }
+    return el;
+  }
+});
 
 window.storage = window.storage || {
   _mem: {},
