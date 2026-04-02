@@ -1,3415 +1,463 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Toluca Lake Group  -  Batch Screener</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500&display=swap');
-  :root {
-    --gold: #C9A84C; --gold-light: #E8C97A; --dark: #0F0F0F; --dark-2: #1A1A1A;
-    --dark-3: #242424; --border: #2E2E2E; --text: #E8E8E8; --text-muted: #888;
-    --green: #4CAF7D; --amber: #E8A04C; --red: #E85C4C;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: var(--dark); color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; padding: 32px 20px; }
-  .container { max-width: 1320px; margin: 0 auto; }
-  header { text-align: center; margin-bottom: 40px; padding-bottom: 28px; border-bottom: 1px solid var(--border); }
-  .logo { font-family: 'Playfair Display', serif; font-size: 12px; letter-spacing: 4px; text-transform: uppercase; color: var(--gold); margin-bottom: 10px; }
-  header h1 { font-family: 'Playfair Display', serif; font-size: 28px; font-weight: 600; margin-bottom: 6px; }
-  header p { color: var(--text-muted); font-size: 13px; }
-  .controls { background: var(--dark-2); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-  .controls-left { flex: 1; min-width: 200px; }
-  .controls-left h2 { font-family: 'Playfair Display', serif; font-size: 16px; color: var(--gold); margin-bottom: 4px; }
-  .controls-left p { font-size: 13px; color: var(--text-muted); }
-  .progress-bar { margin-top: 12px; }
-  .progress-track { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
-  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--gold), var(--gold-light)); transition: width 0.3s; width: 0%; }
-  .progress-label { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
-  .btn { padding: 12px 24px; border-radius: 8px; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; transition: all 0.2s; border: none; }
-  .btn-primary { background: var(--gold); color: var(--dark); }
-  .btn-primary:hover { background: var(--gold-light); }
-  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-secondary { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
-  .btn-secondary:hover { border-color: var(--gold); color: var(--gold); }
-  .stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }
-  .stat-card { background: var(--dark-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; cursor: default; }
-  .stat-card.clickable { cursor: pointer; transition: border-color 0.2s; }
-  .stat-card.clickable:hover { border-color: var(--gold); }
-  .stat-num { font-family: 'Playfair Display', serif; font-size: 28px; font-weight: 600; color: var(--gold); }
-  .stat-label { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
-  .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
-  .filter-btn { padding: 6px 14px; border-radius: 100px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--text-muted); transition: all 0.2s; }
-  .filter-btn.active { border-color: var(--gold); color: var(--gold); background: rgba(201,168,76,0.1); }
-  .sort-btn { padding: 6px 14px; border-radius: 100px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--text-muted); transition: all 0.2s; }
-  .sort-btn.active { border-color: var(--amber); color: var(--amber); background: rgba(232,160,76,0.1); }
-  .export-btn { padding: 6px 14px; border-radius: 100px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--text-muted); transition: all 0.2s; }
-  .export-btn:hover { border-color: var(--green); color: var(--green); }
-  .spacer { flex: 1; }
-  .table-wrap { background: var(--dark-2); border: 1px solid var(--border); border-radius: 12px; overflow: auto; }
-  table { width: 100%; border-collapse: collapse; min-width: 1100px; }
-  th { padding: 12px 14px; text-align: left; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border); background: var(--dark-3); font-weight: 500; white-space: nowrap; user-select: none; }
-  th.sortable { cursor: pointer; }
-  th.sortable:hover { color: var(--gold); }
-  td { padding: 12px 14px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  tr:last-child td { border-bottom: none; }
-  tr:hover td { background: rgba(255,255,255,0.02); }
-  .contact-name { font-weight: 500; color: var(--text); }
-  .contact-company { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-  .contact-industry { font-size: 10px; color: var(--text-muted); margin-top: 2px; opacity: 0.7; }
-  .contact-location { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-  .track-badge { display: inline-block; padding: 4px 10px; border-radius: 100px; font-size: 10px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; white-space: nowrap; }
-  .track-personal { background: rgba(201,168,76,0.15); color: var(--gold); border: 1px solid rgba(201,168,76,0.3); }
-  .track-standard { background: rgba(76,175,125,0.15); color: var(--green); border: 1px solid rgba(76,175,125,0.3); }
-  .track-pending { background: rgba(136,136,136,0.1); color: var(--text-muted); border: 1px solid var(--border); }
-  .track-processing { background: rgba(232,160,76,0.1); color: var(--amber); border: 1px solid rgba(232,160,76,0.3); animation: pulse 1s infinite; }
-  .track-override { background: rgba(201,168,76,0.25); color: var(--gold); border: 1px solid rgba(201,168,76,0.5); }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
-  .score-high { color: var(--gold); font-weight: 600; font-size: 16px; }
-  .score-mid { color: var(--amber); font-weight: 600; font-size: 16px; }
-  .score-low { color: var(--text-muted); font-size: 16px; }
-  .layer-badge { display: inline-block; padding: 2px 5px; border-radius: 4px; font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-left: 5px; vertical-align: middle; }
-  .confidence-bar { display: flex; align-items: center; gap: 5px; margin-top: 4px; }
-  .confidence-dots { display: flex; gap: 2px; }
-  .confidence-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); }
-  .confidence-dot.filled { background: var(--gold); }
-  .confidence-dot.filled.low { background: var(--text-muted); }
-  .confidence-dot.filled.mid { background: var(--amber); }
-  .confidence-label { font-size: 10px; color: var(--text-muted); }
-  .connections-mini { display: flex; gap: 4px; flex-wrap: wrap; }
-  .conn-tag { padding: 2px 7px; border-radius: 4px; font-size: 10px; background: var(--dark-3); color: var(--text-muted); border: 1px solid var(--border); text-decoration: none; display: inline-block; }
-  .conn-tag.strong { color: var(--gold); border-color: rgba(201,168,76,0.3); background: rgba(201,168,76,0.05); }
-  .conn-tag.moderate { color: var(--amber); border-color: rgba(232,160,76,0.3); }
-  .conn-tag.has-source:hover { opacity: 0.75; text-decoration: underline; }
-  .conn-tag .src-icon { font-size: 8px; margin-left: 3px; opacity: 0.6; vertical-align: middle; }
-  .hook-cell { max-width: 280px; }
-  .hook-text { font-size: 12px; color: var(--text); font-style: italic; line-height: 1.5; cursor: pointer; border: 1px solid transparent; border-radius: 4px; padding: 4px; transition: border-color 0.2s; }
-  .hook-text:hover { border-color: var(--border); }
-  .hook-edit { width: 100%; font-size: 12px; font-style: italic; background: var(--dark-3); color: var(--text); border: 1px solid var(--gold); border-radius: 4px; padding: 6px; resize: vertical; min-height: 60px; font-family: 'DM Sans', sans-serif; line-height: 1.5; }
-  .hook-save-btn { font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--green); background: transparent; color: var(--green); cursor: pointer; margin-top: 4px; }
-  .notes-cell { max-width: 200px; }
-  .notes-text { font-size: 11px; color: var(--text-muted); font-style: italic; cursor: pointer; padding: 4px; border: 1px dashed transparent; border-radius: 4px; min-height: 20px; line-height: 1.4; }
-  .notes-text:hover { border-color: var(--border); }
-  .notes-text.has-notes { color: var(--amber); font-style: normal; }
-  .notes-edit { width: 100%; font-size: 11px; background: var(--dark-3); color: var(--text); border: 1px solid var(--amber); border-radius: 4px; padding: 5px; resize: vertical; min-height: 50px; font-family: 'DM Sans', sans-serif; }
-  .notes-save-btn { font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--amber); background: transparent; color: var(--amber); cursor: pointer; margin-top: 4px; }
-  .override-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
-  .override-btn { font-size: 10px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; transition: all 0.2s; }
-  .override-btn:hover { border-color: var(--gold); color: var(--gold); }
-  .override-btn.active { border-color: var(--gold); color: var(--gold); background: rgba(201,168,76,0.1); }
-  .rescreen-btn { font-size: 10px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; transition: all 0.2s; }
-  .rescreen-btn:hover { border-color: var(--amber); color: var(--amber); }
-  .spinner { display: inline-block; width: 10px; height: 10px; border: 1.5px solid rgba(232,160,76,0.3); border-top-color: var(--amber); border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 4px; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .concurrency-note { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
-  .cluster-header { background: var(--dark-3); }
-  .cluster-header td { padding: 8px 14px; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--gold); border-bottom: 1px solid var(--border); font-weight: 600; }
-  .industry-tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; background: rgba(201,168,76,0.08); color: var(--text-muted); border: 1px solid var(--border); }
-  /* Modal */
-  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
-  .modal-overlay.open { display: flex; }
-  .modal { background: var(--dark-2); border: 1px solid var(--border); border-radius: 14px; padding: 28px; max-width: 480px; width: 90%; }
-  .modal h3 { font-family: 'Playfair Display', serif; font-size: 18px; color: var(--gold); margin-bottom: 6px; }
-  .modal p { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
-  .modal textarea { width: 100%; background: var(--dark-3); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: 'DM Sans', sans-serif; font-size: 13px; resize: vertical; min-height: 80px; }
-  .modal-btns { display: flex; gap: 10px; margin-top: 14px; justify-content: flex-end; }
-  .modal-btn { padding: 8px 18px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; }
-  .modal-btn-confirm { background: var(--gold); color: var(--dark); }
-  .modal-btn-cancel { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
-  .timing-bar { display: flex; gap: 20px; margin-top: 8px; flex-wrap: wrap; }
-  .timing-stat { font-size: 11px; color: var(--text-muted); }
-  .timing-stat span { color: var(--gold); font-weight: 600; }
-  .rate-limit-banner { background: rgba(232,160,76,0.1); border: 1px solid rgba(232,160,76,0.3); border-radius: 8px; padding: 8px 14px; font-size: 12px; color: var(--amber); margin-top: 8px; display: none; }
-  /* Page nav + criteria  -  defined below in compact block */
-  /* Page nav */
-  .page-nav { display:flex; gap:4px; margin-bottom:28px; background:var(--dark-2); border:1px solid var(--border); border-radius:10px; padding:4px; width:fit-content; }
-  .page-tab { padding:8px 20px; border-radius:7px; font-size:12px; font-weight:600; letter-spacing:1px; text-transform:uppercase; cursor:pointer; border:none; background:transparent; color:var(--text-muted); transition:all 0.2s; }
-  .page-tab.active { background:var(--dark-3); color:var(--gold); border:1px solid var(--border); }
-  .page { display:none; }
-  .page.active { display:block; }
-  /* Criteria page */
-  .criteria-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:24px; }
-  .criteria-card { background:var(--dark-2); border:1px solid var(--border); border-radius:12px; padding:20px; }
-  .criteria-card h3 { font-family:'Playfair Display',serif; font-size:13px; color:var(--gold); margin-bottom:14px; letter-spacing:2px; text-transform:uppercase; }
-  .criteria-item { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); }
-  .criteria-item:last-child { border-bottom:none; }
-  .search-select-cb { width:15px; height:15px; cursor:pointer; accent-color:var(--gold); flex-shrink:0; }
-  .search-select-cb:disabled { opacity:0.3; cursor:not-allowed; }
-  .search-cap-note { font-size:10px; color:var(--text-muted); font-style:italic; margin-top:8px; }
-  .search-selected-count { font-size:11px; color:var(--gold); font-weight:600; }
-  .criteria-label { flex:1; font-size:12px; color:var(--text); line-height:1.4; }
-  .weight-dots { display:flex; gap:4px; align-items:center; }
-  .custom-trigger-input { flex:1; background:var(--dark-3); border:1px solid var(--border); border-radius:6px; color:var(--text); font-family:'DM Sans',sans-serif; font-size:13px; padding:5px 10px; outline:none; }
-  .custom-trigger-input:focus { border-color:var(--gold); }
-  .custom-trigger-row { gap:8px; }
-  .trigger-delete-btn { background:transparent; border:1px solid var(--border); border-radius:5px; color:var(--text-muted); font-size:11px; cursor:pointer; padding:2px 7px; transition:all 0.15s; flex-shrink:0; }
-  .trigger-delete-btn:hover { border-color:var(--red); color:var(--red); }
-  .add-trigger-btn { background:transparent; border:1px dashed var(--border); border-radius:7px; color:var(--text-muted); font-size:12px; font-weight:500; cursor:pointer; padding:7px 16px; width:100%; transition:all 0.2s; letter-spacing:0.5px; }
-  .add-trigger-btn:hover { border-color:var(--gold); color:var(--gold); background:rgba(201,163,95,0.05); }
-  .wd { width:11px; height:11px; border-radius:50%; border:1.5px solid var(--border); cursor:pointer; transition:all 0.15s; flex-shrink:0; }
-  .wd.w1 { background:var(--text-muted); border-color:var(--text-muted); }
-  .wd.w2 { background:var(--amber); border-color:var(--amber); }
-  .wd.w3 { background:var(--gold); border-color:var(--gold); }
-  .wlabel { font-size:10px; color:var(--text-muted); min-width:44px; }
-  .threshold-row { display:flex; align-items:center; gap:16px; background:var(--dark-2); border:1px solid var(--border); border-radius:10px; padding:16px 20px; margin-bottom:20px; flex-wrap:wrap; }
-  .threshold-row label { font-size:13px; color:var(--text-muted); white-space:nowrap; }
-  .threshold-input { background:var(--dark-3); border:1px solid var(--border); border-radius:6px; color:var(--gold); font-size:22px; font-weight:600; font-family:'Playfair Display',serif; width:70px; padding:6px 10px; text-align:center; }
-  .threshold-input:focus { outline:none; border-color:var(--gold); }
-  .threshold-desc { font-size:12px; color:var(--text-muted); flex:1; min-width:200px; }
-  .feedback-box { background:var(--dark-2); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:20px; }
-  .feedback-box h3 { font-family:'Playfair Display',serif; font-size:13px; color:var(--gold); margin-bottom:8px; letter-spacing:2px; text-transform:uppercase; }
-  .feedback-textarea { width:100%; background:var(--dark-3); border:1px solid var(--border); border-radius:8px; color:var(--text); font-family:'DM Sans',sans-serif; font-size:13px; padding:12px; resize:vertical; min-height:90px; box-sizing:border-box; }
-  .feedback-textarea:focus { outline:none; border-color:var(--gold); }
-  .feedback-entry { padding:10px 12px; background:var(--dark-3); border-radius:8px; margin-bottom:8px; font-size:12px; color:var(--text-muted); display:flex; justify-content:space-between; align-items:start; gap:10px; line-height:1.5; }
-  .feedback-del { cursor:pointer; color:var(--red); opacity:0.5; flex-shrink:0; }
-  .feedback-del:hover { opacity:1; }
-  /* Debug drawer */
-  .drawer-toggle { background: transparent; border: none; cursor: pointer; color: var(--text-muted); font-size: 11px; padding: 2px 5px; border-radius: 3px; transition: color 0.15s; line-height: 1; }
-  .drawer-toggle:hover { color: var(--gold); }
-  .drawer-toggle.open { color: var(--gold); }
-  .debug-drawer { display: none; background: var(--dark-3); border-top: 1px solid var(--border); }
-  .debug-drawer.open { display: table-row; }
-  .debug-drawer td { padding: 16px 20px; }
-  .drawer-inner { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
-  .drawer-section h4 { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--gold); margin-bottom: 10px; font-weight: 600; }
-  .drawer-row { margin-bottom: 7px; }
-  .drawer-label { font-size: 10px; color: var(--text-muted); letter-spacing: 0.5px; margin-bottom: 2px; }
-  .drawer-value { font-size: 11px; color: var(--text); line-height: 1.4; word-break: break-word; }
-  .drawer-value.mono { font-family: monospace; font-size: 10px; color: var(--amber); }
-  .drawer-value.dim { color: var(--text-muted); font-style: italic; }
-  .drawer-chip { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; margin: 1px 2px 1px 0; border: 1px solid var(--border); background: var(--dark-2); }
-  .drawer-chip.confirmed { color: var(--green); border-color: rgba(76,175,125,0.3); }
-  .drawer-chip.inferred { color: var(--amber); border-color: rgba(232,160,76,0.3); }
-  .drawer-chip.weak { color: var(--text-muted); }
-  .drawer-search-result { padding: 5px 0; border-bottom: 1px solid var(--border); }
-  .drawer-search-result:last-child { border-bottom: none; }
-  .drawer-search-result a { font-size: 11px; color: var(--gold); text-decoration: none; }
-  .drawer-search-result a:hover { text-decoration: underline; }
-  .drawer-search-result .snippet { font-size: 10px; color: var(--text-muted); margin-top: 2px; line-height: 1.3; }
-  .drawer-rescreen { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+import os
+import json
+import time
+import uuid
+import threading
+import requests
+from flask import Flask, request, jsonify, send_from_directory, Response
+from flask_cors import CORS
 
-  .profile-field label { display:block; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-muted); margin-bottom:5px; }
-  .profile-field input, .profile-field textarea { width:100%; background:var(--dark-3); border:1px solid var(--border); border-radius:6px; color:var(--text); font-family:'DM Sans',sans-serif; font-size:13px; padding:8px 12px; box-sizing:border-box; }
-  .profile-field input:focus, .profile-field textarea:focus { outline:none; border-color:var(--gold); }
-  .profile-field textarea { resize:vertical; min-height:70px; }
-  .crit-save-btn { background:var(--gold); color:var(--dark); border:none; border-radius:8px; padding:10px 22px; font-size:12px; font-weight:600; letter-spacing:1px; text-transform:uppercase; cursor:pointer; }
-  .crit-save-btn:hover { background:var(--gold-light); }
-  .crit-sec-btn { background:var(--dark-3); color:var(--gold); border:1px solid var(--border); border-radius:8px; padding:10px 22px; font-size:12px; font-weight:600; letter-spacing:1px; text-transform:uppercase; cursor:pointer; }
-</style>
-</head>
-<body>
-<div class="container">
-  <header>
-    <div class="logo">Toluca Lake Group</div>
-    <h1>Batch Contact Screener</h1>
-    <p id="headerDesc">Loading contacts...</p>
-  </header>
-  <div class="page-nav">
-    <button class="page-tab active" id="tab-screener" onclick="if(typeof showPage==='function')showPage('screener')">&#9646; Screener</button>
-    <button class="page-tab" id="tab-criteria" onclick="if(typeof showPage==='function')showPage('criteria')">&#9881; Criteria &amp; Weights</button>
-    <button class="page-tab" id="tab-email" onclick="if(typeof showPage==='function')showPage('email')">&#9993; Email Template</button>
-    <button class="page-tab" id="tab-history" onclick="if(typeof showPage==='function')showPage('history')">&#128197; Batch History</button>
-  </div>
-  <div id="page-screener" class="page active">
+app = Flask(__name__, static_folder='.')
+CORS(app)
 
-  <div class="controls">
-    <div class="controls-left">
-      <h2 id="controlTitle">Ready</h2>
-      <p id="controlDesc">Click Run Screener — the server processes all contacts in the background. You can close this tab.</p>
-      <div id="server-progress" style="display:none;margin-top:12px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-          <span id="server-progress-label" style="font-size:11px;color:var(--text-muted)">Starting...</span>
-          <span id="server-progress-pct" style="font-size:11px;color:var(--gold);font-weight:600">0%</span>
-        </div>
-        <div style="height:4px;background:var(--dark-3);border-radius:2px;overflow:hidden">
-          <div id="server-progress-fill" style="height:100%;background:var(--gold);width:0%;transition:width 0.5s ease;border-radius:2px"></div>
-        </div>
-        <div style="display:flex;justify-content:space-between;margin-top:6px">
-          <span id="server-progress-contact" style="font-size:10px;color:#555;font-style:italic"></span>
-          <span id="server-progress-eta" style="font-size:10px;color:#555"></span>
-        </div>
-      </div>
-      <p class="concurrency-note" id="concurrencyNote"></p>
-      <div class="progress-bar" id="progressBar" style="display:none">
-        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
-        <div class="progress-label" id="progressLabel"></div>
-      </div>
-      <div class="timing-bar" id="timingBar" style="display:none">
-        <div class="timing-stat">Avg: <span id="avgL1"> - </span></div>
-        <div class="timing-stat">Est. remaining: <span id="estRemaining"> - </span></div>
-        <div class="timing-stat">Elapsed: <span id="elapsed"> - </span></div>
-        <div class="timing-stat">Delay: <span id="delayDisplay" style="color:var(--green)">2s</span></div>
-        <div class="timing-stat">Avg tok: <span id="avgTokens"> - </span></div>
-      </div>
-      <div class="rate-limit-banner" id="rateLimitBanner">⏸ Rate limit hit  -  auto-resuming in <span id="resumeCountdown">180</span>s...</div>
-    </div>
-    <button class="btn btn-secondary" id="btnStop" style="display:none" onclick="stopProcessing()">Pause</button>
-    <button class="btn btn-secondary" onclick="showApiKeyModal('Enter or update your Anthropic API key.')" style="font-size:11px;padding:10px 14px" title="Set API Key">🔑 API Key</button>
-    <button class="btn btn-primary" id="btnRun" onclick="startServerScreening()">▶ Run Screener</button>
-  </div>
+@app.after_request
+def allow_iframe(response):
+    # Allow embedding from Toluca Tools
+    response.headers['X-Frame-Options'] = 'ALLOWALL'
+    response.headers['Content-Security-Policy'] = "frame-ancestors *"
+    return response
 
-  <div class="stats">
-    <div class="stat-card"><div class="stat-num" id="statTotal"> - </div><div class="stat-label">Total Contacts</div></div>
-    <div class="stat-card clickable" onclick="setFilter('Personal Outreach',null)"><div class="stat-num" id="statPersonal" style="color:var(--gold)">0</div><div class="stat-label">Personal Outreach</div></div>
-    <div class="stat-card clickable" onclick="setFilter('Standard Sequence',null)"><div class="stat-num" id="statStandard" style="color:var(--green)">0</div><div class="stat-label">Standard Sequence</div></div>
-    <div class="stat-card"><div class="stat-num" id="statProcessed">0</div><div class="stat-label">Screened</div></div>
-    <div class="stat-card clickable" onclick="setFilter('overrides',null)"><div class="stat-num" id="statOverrides" style="color:var(--amber)">0</div><div class="stat-label">Overrides &amp; Notes</div></div>
-    <div class="stat-card" title="Cumulative token usage this run">
-      <div style="display:flex;align-items:baseline;gap:4px">
-        <div class="stat-num" id="statTokens" style="font-size:20px;color:var(--text-muted)">0</div>
-        <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px">tok</div>
-      </div>
-      <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin:6px 0 4px">
-        <div id="statTokenBar" style="height:100%;background:linear-gradient(90deg,var(--amber),var(--gold));width:0%;transition:width 0.4s"></div>
-      </div>
-      <div class="stat-label" style="display:flex;justify-content:space-between">
-        <span>Tokens Used</span>
-        <span id="statTokenCost" style="color:var(--green)">$0.00</span>
-      </div>
-    </div>
-  </div>
+HUBSPOT_TOKEN  = os.environ.get('HUBSPOT_TOKEN', '')
+ANTHROPIC_KEY  = os.environ.get('ANTHROPIC_KEY', '')
+HUBSPOT_BASE   = 'https://api.hubspot.com'
+ANTHROPIC_BASE = 'https://api.anthropic.com'
 
-  <div class="toolbar">
-    <button class="filter-btn active" onclick="setFilter('all',this)">All</button>
-    <button class="filter-btn" onclick="setFilter('Personal Outreach',this)">Personal Outreach</button>
-    <button class="filter-btn" onclick="setFilter('Standard Sequence',this)">Standard Sequence</button>
-    <button class="filter-btn" onclick="setFilter('pending',this)">Pending</button>
-    <button class="filter-btn" onclick="setFilter('overrides',this)">Overrides</button>
-    <span style="width:1px;height:20px;background:var(--border);margin:0 4px;display:inline-block;"></span>
-    <button class="sort-btn" id="sortScoreBtn" onclick="toggleSort('score')">↓ Sort by Score</button>
-    <button class="sort-btn" id="sortIndustryBtn" onclick="toggleSort('industry')">⊞ Cluster by Industry</button>
-    <div class="spacer"></div>
-    <button class="export-btn" onclick="exportCSV()">↓ Export CSV</button>
-    <button class="export-btn" onclick="exportExcel()" style="color:var(--green);border-color:rgba(76,175,125,0.3)" title="Export full results to Excel">↓ Export Excel</button>
-    <button class="export-btn" onclick="triggerImport()" style="color:var(--gold);border-color:rgba(201,168,76,0.3)" title="Import contacts from a Grata CSV export">↑ Import CSV</button>
-    <input type="file" id="csvFileInput" accept=".csv" style="display:none" onchange="handleCSVImport(event)">
-    <button class="export-btn" style="color:var(--red);border-color:var(--border)" onclick="hardReset()">✕ Clear</button>
-    <button class="export-btn" id="btnDebug" onclick="toggleDebug()" style="color:var(--text-muted)">⬤ Debug OFF</button>
-  </div>
+# ── In-memory job store ───────────────────────────────────────────────────────
+JOBS      = {}
+JOBS_LOCK = threading.Lock()
 
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th style="width:24px"></th>
-          <th style="width:200px" class="sortable" onclick="toggleSort('name')">Contact</th>
-          <th style="width:160px">Track</th>
-          <th style="width:85px" class="sortable" onclick="toggleSort('score')">Score</th>
-          <th style="width:200px">Connections</th>
-          <th style="width:260px">Hook <span style="font-size:9px;opacity:0.5;font-weight:400">(click to edit)</span></th>
-          <th style="width:160px">Notes <span style="font-size:9px;opacity:0.5;font-weight:400">(click to add)</span></th>
-        </tr>
-      </thead>
-      <tbody id="tableBody"></tbody>
-    </table>
-  </div>
-</div>
+def hs_headers():
+    return {'Authorization': f'Bearer {HUBSPOT_TOKEN}', 'Content-Type': 'application/json'}
 
-<!-- API Key modal -->
-<div class="modal-overlay" id="apiKeyModal">
-  <div class="modal" style="max-width:520px">
-    <h3>🔑 Anthropic API Key</h3>
-    <p id="apiKeyModalDesc">Enter your Anthropic API key to enable AI screening with live web search. Leave blank to run in heuristic mode only.</p>
-    <input type="password" id="apiKeyInput" placeholder="sk-ant-..." style="width:100%;background:var(--dark-3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:10px;font-family:'DM Sans',sans-serif;font-size:13px;box-sizing:border-box;margin-bottom:8px" onkeydown="if(event.key==='Enter')resolveApiKeyModal(true)">
-    <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Your key stays in this session only and is sent exclusively to api.anthropic.com.</div>
-    <div class="modal-btns">
-      <button class="modal-btn modal-btn-cancel" onclick="resolveApiKeyModal(false)">Run Heuristic Only</button>
-      <button class="modal-btn modal-btn-confirm" onclick="resolveApiKeyModal(true)">Save &amp; Continue</button>
-    </div>
-  </div>
-</div>
+def anthropic_headers():
+    return {'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json'}
 
-<!-- Import CSV modal -->
-<div class="modal-overlay" id="importModal">
-  <div class="modal" style="max-width:520px;width:90%">
-    <h3>Import Contacts</h3>
-    <p id="importModalDesc" style="color:var(--text-muted);font-size:13px;margin-bottom:16px"></p>
-    <div id="importColumnWarning" style="display:none;background:rgba(232,160,76,0.1);border:1px solid rgba(232,160,76,0.3);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--amber);margin-bottom:14px"></div>
-    <div id="importPreview" style="background:var(--dark-3);border-radius:8px;padding:12px;font-size:11px;color:var(--text-muted);margin-bottom:16px;max-height:140px;overflow-y:auto;font-family:monospace;line-height:1.6"></div>
-    <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">How should these contacts be loaded?</p>
-    <div class="modal-btns" style="flex-direction:column;gap:8px">
-      <button class="modal-btn modal-btn-confirm" id="importReplaceBtn" onclick="confirmImport('replace')" style="width:100%">Replace  -  clear existing contacts and load new list</button>
-      <button class="modal-btn" id="importAppendBtn" onclick="confirmImport('append')" style="width:100%;background:var(--dark-3);color:var(--text);border:1px solid var(--border)">Append  -  add to existing contacts</button>
-      <button class="modal-btn modal-btn-cancel" onclick="closeImportModal()" style="width:100%">Cancel</button>
-    </div>
-  </div>
-</div>
+# ── Static ────────────────────────────────────────────────────────────────────
+@app.route('/')
+def index():
+    return send_from_directory('.', 'index.html')
 
-<!-- Generic confirm modal -->
-<div class="modal-overlay" id="confirmModal">
-  <div class="modal">
-    <h3 id="confirmTitle">Confirm</h3>
-    <p id="confirmMessage"></p>
-    <div class="modal-btns">
-      <button class="modal-btn modal-btn-cancel" id="confirmCancelBtn" onclick="resolveConfirm(false)">Cancel</button>
-      <button class="modal-btn modal-btn-confirm" id="confirmOkBtn" onclick="resolveConfirm(true)">Confirm</button>
-    </div>
-  </div>
-</div>
+# ── Claude API proxy (browser-side fallback) ──────────────────────────────────
+@app.route('/api/messages', methods=['POST'])
+def proxy():
+    try:
+        api_key = request.headers.get('x-api-key', '') or ANTHROPIC_KEY
+        data = request.get_json(force=True)
+        resp = requests.post(
+            f'{ANTHROPIC_BASE}/v1/messages',
+            headers={'x-api-key': api_key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
+            json=data, timeout=300
+        )
+        return Response(resp.content, status=resp.status_code,
+                        content_type=resp.headers.get('content-type', 'application/json'))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-<!-- Generic alert modal -->
-<div class="modal-overlay" id="alertModal">
-  <div class="modal">
-    <p id="alertMessage" style="color:var(--text);margin-bottom:0"></p>
-    <div class="modal-btns">
-      <button class="modal-btn modal-btn-confirm" onclick="resolveAlert()">OK</button>
-    </div>
-  </div>
-</div>
+# ── Fetch contacts from HubSpot ───────────────────────────────────────────────
+def _fetch_contacts(batch_id, full=False):
+    """Pull contacts for a batch. full=True fetches all scanner properties."""
+    base_props = [
+        'firstname', 'lastname', 'jobtitle', 'company', 'email',
+        'hs_linkedinid', 'industry', 'city', 'state',
+        'annualrevenue', 'founded_year', 'description', 'website',
+        'scanner_track', 'scanner_score', 'scanner_hook', 'neverbounce_status'
+    ]
+    extra_props = [
+        'scanner_recommendation', 'scanner_track_reason', 'scanner_connections',
+        'scanner_override', 'scanner_override_note', 'scanner_notes'
+    ] if full else []
+    props = base_props + extra_props
 
-<!-- Override modal -->
-<div class="modal-overlay" id="overrideModal">
-  <div class="modal">
-    <h3 id="modalTitle">Force Personal Outreach</h3>
-    <p id="modalDesc">Add a note explaining why this contact warrants personal outreach.</p>
-    <textarea id="modalNotes" placeholder="e.g. Met at Sacramento Chamber event, knows my mentor John Smith..."></textarea>
-    <div class="modal-btns">
-      <button class="modal-btn modal-btn-cancel" onclick="closeModal()">Cancel</button>
-      <button class="modal-btn modal-btn-confirm" onclick="confirmOverride()">Confirm Override</button>
-    </div>
-  </div>
-</div>
+    contacts = []
+    raw_contacts = []
+    after = None
+    while True:
+        payload = {
+            'filterGroups': [{'filters': [{'propertyName': 'grata_batch', 'operator': 'EQ', 'value': batch_id}]}],
+            'properties': props + ['associatedcompanyid'], 'limit': 100
+        }
+        if after:
+            payload['after'] = after
+        resp = requests.post(f'{HUBSPOT_BASE}/crm/v3/objects/contacts/search',
+                             headers=hs_headers(), json=payload, timeout=30)
+        if not resp.ok:
+            raise Exception(f'HubSpot {resp.status_code}: {resp.text[:200]}')
+        data = resp.json()
+        raw_contacts.extend(data.get('results', []))
+        nxt = data.get('paging', {}).get('next', {}).get('after')
+        if nxt: after = nxt
+        else:   break
 
-<script type="application/json" id="batch-contacts-data">
-[]
-</script>
-<script type="application/json" id="steven-profile-data">
-"STEVEN PAVLOV \u2014 BACKGROUND FOR CONNECTION ANALYSIS\n- Born in former Soviet Union, immigrated to US in 1994 as child with single mother\n- Mother rebuilt her life in the US: worked full time while earning bachelor's and master's degrees\n- Lives in Sacramento, CA with wife and young daughter\n- CFO, California Department of Developmental Services ($19B agency, 80-person team)\n- UC Berkeley Haas MBA (Dec 2025), UCLA BA Political Science & History\n- U.S. Army Infantry Officer, Ranger-qualified, California Army National Guard (2012-present)\n- Battalion Operations Officer; commanded 130-soldier infantry company (ranked 3rd of 34 captains)\n- Deployed to Ukraine 2016 as U.S. Embassy Liaison Officer\n- California Senate Fellow \u2014 Legislative Aide to State Senator Norma Torres\n- Avid marathon runner, managed local political campaigns, civic engagement\n- Founding Toluca Lake Group to acquire ONE exceptional company long-term\n- Wants to be a steward of the business and employees, not a financial engineer\n\nKEY CONNECTION TRIGGERS (things that warrant a personal email vs standard sequence):\n1. Immigrant background \u2014 especially Eastern Europe, former Soviet states, or any first-gen immigrant story\n2. Military veteran \u2014 any branch, especially Army, infantry, combat arms, special operations\n3. Single parent family / bootstrapped personal upbringing\n4. California native with deep roots, especially Sacramento, Antelope Valley, or San Fernando Valley\n5. UCLA or UC Berkeley alumni\n6. Government or public sector background before entrepreneurship\n7. Started business from scratch with very limited resources\n8. Business serves government or military clients (especially relevant given Steven's background)\n9. Owner approaching retirement age with no clear family succession plan\n10. First-generation immigrant who built the business from nothing\n11. Sacramento area business owner (shared community connection)\n12. Endurance athlete \u2014 marathon running, cycling, triathlon\n13. Civic engagement, political involvement, community leadership\n14. Strong employee culture, loyal workforce, long-tenured staff\n15. Business in sectors Steven has direct government oversight experience (disability services, human services, developmental services)"
-</script>
-<script>
-// Profile field defaults — declared here so buildCriteriaPayload can access profileCache
-const PROFILE_DEFAULTS = {
-  background: "Born in former Soviet Union, immigrated to US in 1994 as child with single mother. Mother rebuilt her life: worked full time while earning bachelor's and master's degrees.",
-  location: 'Sacramento, CA',
-  military: 'U.S. Army Infantry Officer, Ranger-qualified, California Army National Guard (2012-present). Deployed to Ukraine 2016.',
-  education: 'UC Berkeley Haas MBA (Dec 2025), UCLA BA Political Science & History',
-  other: 'CFO California Dept of Developmental Services. California Senate Fellow. Avid marathon runner. Founding Toluca Lake Group to acquire ONE exceptional company long-term.'
-};
-let profileCache = { ...PROFILE_DEFAULTS };
+    # Batch-fetch company names for all associated companies
+    company_id_to_name = {}
+    co_ids = list(set(
+        c.get('properties', {}).get('associatedcompanyid', '')
+        for c in raw_contacts
+        if c.get('properties', {}).get('associatedcompanyid', '')
+    ))
+    for i in range(0, len(co_ids), 100):
+        batch = co_ids[i:i+100]
+        co_resp = requests.post(f'{HUBSPOT_BASE}/crm/v3/objects/companies/batch/read',
+            headers=hs_headers(),
+            json={'inputs': [{'id': cid} for cid in batch], 'properties': ['name']},
+            timeout=20)
+        if co_resp.ok:
+            for co in co_resp.json().get('results', []):
+                company_id_to_name[co['id']] = co.get('properties', {}).get('name', '')
 
-// ─── SERVER-SIDE SCREENING ───────────────────────────────────────────────────
-let activeJobId   = null;
-let pollInterval  = null;
+    for c in raw_contacts:
+            p = c.get('properties', {})
+            loc = ', '.join(x for x in [p.get('city',''), p.get('state','')] if x)
+            # Use associated company name if contact's own company field is blank
+            co_id = p.get('associatedcompanyid', '')
+            company_name = p.get('company', '') or company_id_to_name.get(co_id, '')
+            entry = {
+                'hubspot_id':     c['id'],
+                'firstName':      p.get('firstname', ''),
+                'lastName':       p.get('lastname', ''),
+                'jobTitle':       p.get('jobtitle', ''),
+                'company':        company_name,
+                'email':          p.get('email', ''),
+                'linkedin':       p.get('hs_linkedinid', ''),
+                'industry':       p.get('industry', ''),
+                'location':       loc,
+                'revenue':        p.get('annualrevenue', ''),
+                'founded':        p.get('founded_year', ''),
+                'description':    p.get('description', ''),
+                'website':        p.get('website', ''),
+                'neverbounce':    p.get('neverbounce_status', ''),
+                'existing_track': p.get('scanner_track', ''),
+                'existing_score': p.get('scanner_score', ''),
+                'existing_hook':  p.get('scanner_hook', ''),
+            }
+            if full:
+                entry.update({
+                    'existing_recommendation': p.get('scanner_recommendation', ''),
+                    'existing_track_reason':   p.get('scanner_track_reason', ''),
+                    'existing_override':       p.get('scanner_override', ''),
+                    'existing_override_note':  p.get('scanner_override_note', ''),
+                    'existing_notes':          p.get('scanner_notes', ''),
+                })
+            contacts.append(entry)
+    return contacts
 
-function buildCriteriaPayload() {
-  // Collect current criteria to send to the server
-  const profile = {
-    background: (document.getElementById('profileBackground') || {}).value || profileCache.background || '',
-    location:   (document.getElementById('profileLocation')   || {}).value || profileCache.location   || '',
-    military:   (document.getElementById('profileMilitary')   || {}).value || profileCache.military   || '',
-    education:  (document.getElementById('profileEducation')  || {}).value || profileCache.education  || '',
-    other:      (document.getElementById('profileOther')      || {}).value || profileCache.other       || '',
-  };
+@app.route('/api/batch-contacts', methods=['GET'])
+def batch_contacts():
+    batch_id = request.args.get('batch_id', '').strip()
+    if not batch_id: return jsonify({'error': 'batch_id required'}), 400
+    if not HUBSPOT_TOKEN: return jsonify({'error': 'HUBSPOT_TOKEN not configured'}), 500
+    try:
+        contacts = _fetch_contacts(batch_id, full=True)
+        return jsonify({'contacts': contacts, 'count': len(contacts)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-  const weights = getAllTriggers()
-    .filter(t => t.label && t.label.trim())
-    .map(t => ({ label: t.label, weight: getTriggerWeight(t.id) }));
-
-  const search2Terms = getSearch2Terms ? getSearch2Terms() : '';
-
-  return {
-    threshold:    getCriteriaThreshold(),
-    profile,
-    weights,
-    feedback:     feedbackItems || [],
-    search2_terms: search2Terms
-  };
-}
-
-async function startServerScreening() {
-  if (!BATCH_ID) {
-    await showAlert('No batch loaded. Open the scanner from a batch in Toluca Tools.');
-    return;
-  }
-  if (activeJobId) {
-    await showAlert('A screening job is already running for this batch.');
-    return;
-  }
-
-  const btn = document.getElementById('btnRun');
-  btn.disabled = true;
-  btn.textContent = 'Starting...';
-  document.getElementById('server-progress').style.display = 'block';
-  document.getElementById('controlDesc').textContent = 'Server is processing contacts — you can close this tab safely.';
-
-  try {
-    const resp = await fetch('/api/screen-batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ batch_id: BATCH_ID, criteria: buildCriteriaPayload() })
-    });
-    const data = await resp.json();
-
-    if (!resp.ok || data.error) {
-      btn.disabled = false;
-      btn.textContent = '▶ Run Screener';
-      await showAlert(data.error || 'Failed to start screening job');
-      return;
+# ── HubSpot write helpers ─────────────────────────────────────────────────────
+def _build_hs_props(result):
+    connections = result.get('connections', [])
+    conn_json, conn_summary = '', ''
+    if connections:
+        conn_json = json.dumps(connections)[:65000]
+        parts = [f"{c.get('basis','')}/{c.get('strength','')}: {c.get('type','')}"
+                 for c in connections if c.get('type')]
+        conn_summary = ' | '.join(parts)[:65000]
+    props = {
+        'scanner_track':              result.get('track', ''),
+        'scanner_score':              str(result.get('score', '')),
+        'scanner_hook':               (result.get('hook', '') or '')[:65000],
+        'scanner_recommendation':     (result.get('recommendation', '') or '')[:65000],
+        'scanner_track_reason':       (result.get('track_reason', '') or '')[:65000],
+        'scanner_connections':        conn_json,
+        'scanner_connection_summary': conn_summary,
+        'scanner_override':           'true' if result.get('override') else '',
+        'scanner_override_note':      (result.get('override_note', '') or '')[:65000],
+        'scanner_notes':              (result.get('notes', '') or '')[:65000],
     }
-
-    activeJobId = data.job_id;
-
-    // Save job ID to storage so we can reconnect after page reload
-    try {
-      await window.storage.set('active_job_' + BATCH_ID, JSON.stringify({
-        job_id: activeJobId,
-        started: new Date().toISOString(),
-        total: data.total
-      }));
-    } catch(e) {}
-
-    btn.textContent = '⏳ Screening...';
-    document.getElementById('server-progress-label').textContent =
-      `${data.already_screened} already screened — ${data.total} to process`;
-
-    startPolling();
-  } catch(e) {
-    btn.disabled = false;
-    btn.textContent = '▶ Run Screener';
-    await showAlert('Network error: ' + e.message);
-  }
-}
-
-function startPolling() {
-  if (pollInterval) clearInterval(pollInterval);
-  pollInterval = setInterval(pollJobStatus, 3000);
-  pollJobStatus(); // immediate first poll
-}
-
-function stopPolling() {
-  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-}
-
-async function pollJobStatus() {
-  if (!activeJobId) return;
-  try {
-    const resp = await fetch(`/api/screen-status/${activeJobId}`);
-    if (!resp.ok) return;
-    const job = await resp.json();
-    updateProgressUI(job);
-
-    if (job.done) {
-      stopPolling();
-      onScreeningComplete(job);
-    }
-  } catch(e) {}
-}
-
-function updateProgressUI(job) {
-  const pct   = job.pct || 0;
-  const label = `${job.processed} of ${job.total} screened`;
-  document.getElementById('server-progress-fill').style.width  = pct + '%';
-  document.getElementById('server-progress-pct').textContent   = pct + '%';
-  document.getElementById('server-progress-label').textContent = label;
-
-  if (job.current_contact) {
-    document.getElementById('server-progress-contact').textContent = '→ ' + job.current_contact;
-  }
-
-  if (job.eta_s && !job.done) {
-    const mins = Math.floor(job.eta_s / 60);
-    const secs = job.eta_s % 60;
-    document.getElementById('server-progress-eta').textContent =
-      mins > 0 ? `~${mins}m ${secs}s remaining` : `~${secs}s remaining`;
-  }
-}
-
-async function onScreeningComplete(job) {
-  const btn = document.getElementById('btnRun');
-  btn.disabled = false;
-  btn.textContent = '▶ Run Screener';
-
-  document.getElementById('server-progress-contact').textContent = '';
-  document.getElementById('server-progress-eta').textContent = '✓ Complete';
-  document.getElementById('server-progress-pct').textContent = '100%';
-  document.getElementById('server-progress-fill').style.width = '100%';
-  document.getElementById('controlDesc').textContent =
-    `Screening complete — ${job.processed} contacts scored. Reloading results from HubSpot...`;
-
-  activeJobId = null;
-  try { await window.storage.delete('active_job_' + BATCH_ID); } catch(e) {}
-
-  // Reload batch from HubSpot to get all freshly-written results
-  await new Promise(r => setTimeout(r, 1500));
-  await loadBatchFromHubSpot(BATCH_ID);
-
-  if (job.error_count > 0) {
-    document.getElementById('controlDesc').textContent =
-      `Done — ${job.processed} screened, ${job.error_count} errors. Check console for details.`;
-  }
-}
-
-// On page load: reconnect to any running job for this batch
-async function reconnectJob() {
-  if (!BATCH_ID) return;
-  try {
-    const stored = await window.storage.get('active_job_' + BATCH_ID).catch(()=>null);
-    if (!stored || !stored.value) return;
-    const saved = JSON.parse(stored.value);
-    if (!saved.job_id) return;
-
-    // Check if job is still running
-    const resp = await fetch(`/api/screen-status/${saved.job_id}`);
-    if (!resp.ok) return;
-    const job = await resp.json();
-
-    if (job.done) {
-      // Job finished while we were away — reload results
-      await window.storage.delete('active_job_' + BATCH_ID).catch(()=>{});
-      document.getElementById('controlDesc').textContent = 'Previous screening job completed. Reloading...';
-      await new Promise(r => setTimeout(r, 800));
-      await loadBatchFromHubSpot(BATCH_ID);
-      return;
-    }
-
-    // Job still running — reconnect
-    activeJobId = saved.job_id;
-    const btn = document.getElementById('btnRun');
-    btn.disabled = true;
-    btn.textContent = '⏳ Screening...';
-    document.getElementById('server-progress').style.display = 'block';
-    document.getElementById('controlDesc').textContent = 'Reconnected to running screening job — you can close this tab.';
-    updateProgressUI(job);
-    startPolling();
-  } catch(e) {}
-}
-
-// ─── BATCH HISTORY ───────────────────────────────────────────────────────────
-async function saveBatchToHistory(batchId, total, prePopulated) {
-  try {
-    const existing = await window.storage.get('batch_history').catch(()=>null);
-    let history = [];
-    if (existing && existing.value) history = JSON.parse(existing.value);
-    // Update or insert
-    const idx = history.findIndex(b => b.batchId === batchId);
-    const entry = {
-      batchId,
-      total,
-      prePopulated,
-      lastOpened: new Date().toISOString()
-    };
-    if (idx >= 0) history[idx] = { ...history[idx], ...entry };
-    else history.unshift(entry);
-    // Keep last 50 batches
-    history = history.slice(0, 50);
-    await window.storage.set('batch_history', JSON.stringify(history));
-  } catch(e) {}
-}
-
-async function updateBatchHistoryStatus(batchId, screened, personal, standard, pushed) {
-  try {
-    const existing = await window.storage.get('batch_history').catch(()=>null);
-    let history = [];
-    if (existing && existing.value) history = JSON.parse(existing.value);
-    const idx = history.findIndex(b => b.batchId === batchId);
-    if (idx >= 0) {
-      history[idx].screened = screened;
-      history[idx].personal = personal;
-      history[idx].standard = standard;
-      if (pushed) history[idx].pushed = true;
-      history[idx].lastUpdated = new Date().toISOString();
-      await window.storage.set('batch_history', JSON.stringify(history));
-    }
-  } catch(e) {}
-}
-
-async function renderBatchHistory() {
-  const el = document.getElementById('batch-history-list');
-  if (!el) return;
-  try {
-    const data = await window.storage.get('batch_history').catch(()=>null);
-    if (!data || !data.value) {
-      el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:20px 0">No batches loaded yet. Open a batch from Toluca Tools to get started.</div>';
-      return;
-    }
-    const history = JSON.parse(data.value);
-    if (!history.length) {
-      el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:20px 0">No batches loaded yet.</div>';
-      return;
-    }
-    el.innerHTML = history.map(b => {
-      const date = b.lastOpened ? new Date(b.lastOpened).toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) : '';
-      let statusHtml = '';
-      if (b.pushed) {
-        statusHtml = `<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:rgba(76,175,125,0.15);color:var(--green);border:1px solid rgba(76,175,125,0.3);letter-spacing:0.5px">Pushed</span>`;
-      } else if (b.screened) {
-        statusHtml = `<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:rgba(201,168,76,0.12);color:var(--gold);border:1px solid rgba(201,168,76,0.3);letter-spacing:0.5px">Screened</span>`;
-      } else if (b.prePopulated > 0) {
-        statusHtml = `<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:rgba(136,136,136,0.15);color:var(--text-muted);border:1px solid var(--border);letter-spacing:0.5px">Partial</span>`;
-      }
-      const screenerInfo = b.screened ? `${b.screened} screened — ${b.personal || 0} personal, ${b.standard || 0} standard` : 
-                           b.prePopulated > 0 ? `${b.prePopulated} of ${b.total} previously screened` :
-                           `${b.total} contacts`;
-      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border);gap:12px">
-        <div style="flex:1;min-width:0">
-          <div style="font-family:monospace;font-size:12px;color:var(--gold);font-weight:600;margin-bottom:3px">${b.batchId}</div>
-          <div style="font-size:11px;color:var(--text-muted)">${screenerInfo}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
-          ${statusHtml}
-          <div style="font-size:11px;color:#555">${date}</div>
-          <a href="/?batch=${encodeURIComponent(b.batchId)}" 
-             style="font-size:11px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);text-decoration:none;transition:all .2s"
-             onmouseover="this.style.borderColor='var(--gold)';this.style.color='var(--gold)'"
-             onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">
-            Open →
-          </a>
-        </div>
-      </div>`;
-    }).join('');
-  } catch(e) {
-    el.innerHTML = '<div style="font-size:12px;color:var(--red)">Error loading history.</div>';
-  }
-}
-
-// ─── DOM CACHE  -  must be first, everything uses it ───────────
-const _domIds = ['controlTitle','controlDesc','concurrencyNote','btnRun','btnStop',
-  'progressBar','progressFill','progressLabel','timingBar','rateLimitBanner',
-  'avgL1','estRemaining','elapsed','resumeCountdown','delayDisplay','avgTokens',
-  'statTotal','statPersonal','statStandard','statProcessed','statOverrides',
-  'tableBody'];
-const _rawDOM = Object.fromEntries(_domIds.map(id => [id, document.getElementById(id)]));
-const DOM = new Proxy(_rawDOM, {
-  get(target, prop) {
-    const el = target[prop];
-    if (!el) {
-      // Return a no-op stub so .textContent = x never crashes
-      return { textContent: '', style: {}, disabled: false };
-    }
-    return el;
-  }
-});
-
-// Use localStorage for persistence across sessions (criteria, sequences, profile)
-// Fall back to in-memory if localStorage unavailable
-window.storage = window.storage || {
-  _ls: (function(){
-    try { localStorage.setItem('_test','1'); localStorage.removeItem('_test'); return true; }
-    catch(e){ return false; }
-  })(),
-  _mem: {},
-  async get(key) {
-    try {
-      if(this._ls){ const v = localStorage.getItem('tl_'+key); return v !== null ? {value:v} : null; }
-      const v = this._mem[key]; return v !== undefined ? {value:v} : null;
-    } catch(e){ const v = this._mem[key]; return v !== undefined ? {value:v} : null; }
-  },
-  async set(key, value) {
-    try {
-      if(this._ls) localStorage.setItem('tl_'+key, String(value));
-      this._mem[key] = String(value); return {ok:true};
-    } catch(e){ this._mem[key] = String(value); return {ok:true}; }
-  },
-  async delete(key) {
-    try { if(this._ls) localStorage.removeItem('tl_'+key); }
-    catch(e){}
-    delete this._mem[key]; return {ok:true};
-  },
-  async list(prefix) {
-    const keys = [];
-    if(this._ls){
-      for(let i=0;i<localStorage.length;i++){
-        const k = localStorage.key(i);
-        if(k && k.startsWith('tl_'+(prefix||''))) keys.push(k.slice(3));
-      }
-    } else {
-      Object.keys(this._mem).filter(k=>!prefix||k.startsWith(prefix)).forEach(k=>keys.push(k));
-    }
-    return {keys};
-  }
-};
-
-// ─── DEBUG ───────────────────────────────────────────────────
-let debugMode = false;
-function toggleDebug() {
-  debugMode = !debugMode;
-  const btn = document.getElementById('btnDebug');
-  btn.textContent = debugMode ? '⬤ Debug ON' : '⬤ Debug OFF';
-  btn.style.color = debugMode ? 'var(--amber)' : 'var(--text-muted)';
-  btn.style.borderColor = debugMode ? 'rgba(232,160,76,0.4)' : 'var(--border)';
-  if (debugMode) console.log('%c[DEBUG] Debug mode enabled', 'color:#E8A04C;font-weight:bold');
-}
-function dbg(...args) { if (debugMode) console.log('%c[DEBUG]', 'color:#E8A04C;font-weight:bold', ...args); }
-
-// ─── IN-DOM MODAL SYSTEM (replaces blocked prompt/confirm/alert) ──────────────
-let _confirmResolve = null;
-let _alertResolve = null;
-let _apiKeyResolve = null;
-
-function showConfirm(title, message, okLabel = 'Confirm', cancelLabel = 'Cancel') {
-  return new Promise(resolve => {
-    _confirmResolve = resolve;
-    document.getElementById('confirmTitle').textContent = title;
-    document.getElementById('confirmMessage').textContent = message;
-    document.getElementById('confirmOkBtn').textContent = okLabel;
-    document.getElementById('confirmCancelBtn').textContent = cancelLabel;
-    document.getElementById('confirmModal').classList.add('open');
-  });
-}
-function resolveConfirm(val) {
-  document.getElementById('confirmModal').classList.remove('open');
-  if (_confirmResolve) { _confirmResolve(val); _confirmResolve = null; }
-}
-
-function showAlert(message) {
-  return new Promise(resolve => {
-    _alertResolve = resolve;
-    document.getElementById('alertMessage').innerHTML = message.replace(/\n/g, '<br>');
-    document.getElementById('alertModal').classList.add('open');
-  });
-}
-function resolveAlert() {
-  document.getElementById('alertModal').classList.remove('open');
-  if (_alertResolve) { _alertResolve(); _alertResolve = null; }
-}
-
-function showApiKeyModal(desc) {
-  // Can be called as promise (from ensureApiKey) or directly (from toolbar button)
-  const promise = new Promise(resolve => {
-    _apiKeyResolve = resolve;
-  });
-  if (desc) document.getElementById('apiKeyModalDesc').textContent = desc;
-  // Pre-fill with existing key (masked)
-  document.getElementById('apiKeyInput').value = _apiKeyCache ? '••••••••' : '';
-  document.getElementById('apiKeyInput').placeholder = _apiKeyCache ? 'Key set  -  enter new key to replace' : 'sk-ant-...';
-  document.getElementById('apiKeyModal').classList.add('open');
-  setTimeout(() => { const el = document.getElementById('apiKeyInput'); if(el){ el.focus(); el.select(); } }, 100);
-  return promise;
-}
-function resolveApiKeyModal(save) {
-  document.getElementById('apiKeyModal').classList.remove('open');
-  if (_apiKeyResolve) {
-    if (save) {
-      const raw = document.getElementById('apiKeyInput').value.trim();
-      // If user left the masked placeholder, keep existing key
-      const key = (raw && raw !== '••••••••') ? raw : _apiKeyCache;
-      if (raw && raw !== '••••••••') setApiKey(key);
-      _apiKeyResolve(key);
-    } else {
-      _apiKeyResolve(_apiKeyCache || '');
-    }
-    _apiKeyResolve = null;
-  }
-}
-
-// Safe localStorage helper  -  falls back to in-memory when blocked (Claude.ai sandbox)
-const _lsMem = {};
-function lsGet(k) { try { return localStorage.getItem(k); } catch(e) { return _lsMem[k] || null; } }
-function lsSet(k, v) { try { localStorage.setItem(k, v); } catch(e) { _lsMem[k] = v; } }
-
-const CONFIG = {
-  anthropicModel: lsGet('tls_anthropic_model') || 'claude-sonnet-4-6',
-  anthropicVersion: '2023-06-01'
-};
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function escapeAttr(value) {
-  return escapeHtml(value).replace(/`/g, '&#96;');
-}
-
-function parseRevenueValue(revenue) {
-  const raw = String(revenue || '').trim();
-  if (!raw) return null;
-  if (raw.includes('<1,000,000')) return 750000;
-  const digits = raw.replace(/[^\d.]/g, '');
-  return digits ? Number(digits) : null;
-}
-
-// In-memory key store  -  used when localStorage is blocked
-let _apiKeyCache = lsGet('tls_anthropic_key') || '';
-
-function getAnthropicApiKey() {
-  return _apiKeyCache.trim();
-}
-
-async function ensureApiKey() {
-  if (_apiKeyCache.trim()) return _apiKeyCache.trim();
-  const key = await showApiKeyModal();
-  return key.trim();
-}
-
-function setApiKey(key) {
-  _apiKeyCache = key.trim();
-  lsSet('tls_anthropic_key', _apiKeyCache);
-}
-
-function heuristicScreen(contact) {
-  let score = 0;
-  const reasons = [];
-  const jobTitle = String(contact.jobTitle || '').toLowerCase();
-  const company = String(contact.company || '');
-  const description = String(contact.description || '').toLowerCase();
-  const revenue = parseRevenueValue(contact.revenue);
-  const location = String(contact.location || '');
-  const email = String(contact.email || '').toLowerCase();
-
-  if (/(owner|founder|president|chief executive officer|ceo|co-owner|managing partner|principal)/i.test(jobTitle)) {
-    score += 28;
-    reasons.push({ strength: 'strong', type: 'Owner/CEO', description: 'Decision-maker title suggests direct ownership or executive control.', sourceUrl: '' });
-  } else if (jobTitle) {
-    score += 8;
-  }
-
-  if (email && !/^(info|sales|admin|support|contact)@/i.test(email)) {
-    score += 12;
-    reasons.push({ strength: 'moderate', type: 'Direct email', description: 'Named email address is better for direct outreach than a generic inbox.', sourceUrl: '' });
-  } else if (email) {
-    score -= 6;
-  }
-
-  if (revenue !== null) {
-    if (revenue >= 1000000 && revenue <= 15000000) {
-      score += 18;
-      reasons.push({ strength: 'strong', type: 'Target size', description: 'Estimated revenue appears to fit a lower-middle-market target band.', sourceUrl: '' });
-    } else if (revenue <= 35000000) {
-      score += 8;
-    }
-  }
-
-  if (/fire|safety|protection|suppression|sprinkler|alarm/.test(description + ' ' + company.toLowerCase())) {
-    score += 18;
-    reasons.push({ strength: 'strong', type: 'Fire protection', description: 'Company appears to operate in fire protection, safety, or compliance-driven services.', sourceUrl: '' });
-  }
-
-  if (/california|ca/.test(location.toLowerCase()) || /, ca$/.test(location.toLowerCase())) {
-    score += 6;
-  }
-  if (/sacramento/i.test(location)) {
-    score += 5;
-    reasons.push({ strength: 'moderate', type: 'Sacramento', description: 'Sacramento-area proximity may support a warmer initial outreach angle.', sourceUrl: '' });
-  }
-  if (contact.linkedin) score += 6;
-  if ((contact.description || '').length > 180) score += 4;
-
-  score = Math.max(0, Math.min(100, Math.round(score)));
-  const threshold = getCriteriaThreshold();
-  return {
-    score,
-    track: score > threshold ? 'Personal Outreach' : 'Standard Sequence',
-    connections: reasons.slice(0, 4),
-    recommendation: 'Heuristic mode only. Add an Anthropic API key to enable live AI scoring and web-backed connection analysis.',
-    hook: score > threshold ? `I came across ${escapeHtml(company)} and liked the compliance-heavy positioning in fire protection. I am building Toluca Lake Group around durable service businesses and thought it might make sense to introduce myself.` : '',
-    industryCluster: /fire|safety|suppression|sprinkler/i.test(company + ' ' + description) ? 'Fire Protection' : (contact.industry || 'Other')
-  };
-}
-
-const BATCH_CONTACTS = JSON.parse(document.getElementById('batch-contacts-data').textContent);
-const STEVEN_PROFILE = JSON.parse(document.getElementById('steven-profile-data').textContent);
-
-let allContacts = BATCH_CONTACTS;
-
-// ── Batch loading from HubSpot ───────────────────────────────────────────────
-const urlParams = new URLSearchParams(window.location.search);
-const BATCH_ID = urlParams.get('batch') || '';
-
-async function loadBatchFromHubSpot(batchId) {
-  document.getElementById('headerDesc').textContent = `Loading ${batchId}...`;
-  document.getElementById('statTotal').textContent = '...';
-  // Show loading skeleton in table
-  const tbody = document.getElementById('contacts-tbody');
-  if (tbody) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:48px 0;color:var(--text-muted);font-size:13px;letter-spacing:1px">' +
-      '<div style="margin-bottom:10px;font-size:20px">⏳</div>Loading contacts from HubSpot...</td></tr>';
-  }
-  try {
-    const resp = await fetch(`/api/batch-contacts?batch_id=${encodeURIComponent(batchId)}`);
-    const data = await resp.json();
-    if (!resp.ok || data.error) {
-      document.getElementById('headerDesc').textContent = `Error loading batch: ${data.error}`;
-      return;
-    }
-    allContacts = data.contacts;
-    results = {};
-    overrides = {};
-    notes = {};
-    hookEdits = {};
-
-    // Pre-populate results from existing HubSpot scanner properties
-    let prePopulated = 0;
-    allContacts.forEach((c, i) => {
-      if (c.existing_track && c.existing_score) {
-        results[i] = {
-          status:      'done',
-          track:       c.existing_track,
-          score:       parseFloat(c.existing_score) || 0,
-          hook:        c.existing_hook || '',
-          recommendation: '',
-          connections: [],
-          industryCluster: '',
-          _preloaded:  true
-        };
-        if (c.existing_hook) hookEdits[i] = c.existing_hook;
-        prePopulated++;
-      }
-    });
-
-    document.getElementById('statTotal').textContent = allContacts.length;
-    const preMsg = prePopulated > 0 ? ` — ${prePopulated} previously screened` : '';
-    document.getElementById('headerDesc').textContent = `${batchId} — ${allContacts.length} contacts${preMsg}`;
-    renderTable();
-    updateStats();
-    showBatchControls(batchId);
-
-    // Track batch in history
-    saveBatchToHistory(batchId, allContacts.length, prePopulated);
-
-    // Reconnect to any running screening job
-    setTimeout(reconnectJob, 500);
-  } catch(e) {
-    document.getElementById('headerDesc').textContent = `Failed to load batch: ${e.message}`;
-  }
-}
-
-function showBatchControls(batchId) {
-  const existing = document.getElementById('batch-action-bar');
-  if (existing) return;
-  const toolbar = document.querySelector('.toolbar');
-  const bar = document.createElement('div');
-  bar.id = 'batch-action-bar';
-  bar.style.cssText = 'display:flex;gap:10px;align-items:center;margin-bottom:12px;padding:12px 16px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.2);border-radius:8px;flex-wrap:wrap';
-  bar.innerHTML = `
-    <span style="font-size:12px;color:var(--gold);font-weight:600;letter-spacing:0.5px">${batchId}</span>
-    <span style="font-size:11px;color:var(--text-muted)">${allContacts.length} contacts</span>
-    <div style="flex:1"></div>
-    <button class="btn btn-secondary" onclick="writeResultsToHubSpot()" style="font-size:12px;padding:8px 16px" id="btn-write-hs">
-      ↑ Write to HubSpot
-    </button>
-    <button class="btn btn-primary" onclick="pushToReplyIo()" style="font-size:12px;padding:8px 16px" id="btn-push-reply">
-      → Push to Reply.io
-    </button>
-  `;
-  toolbar.parentNode.insertBefore(bar, toolbar);
-}
-
-async function writeResultsToHubSpot() {
-  const btn = document.getElementById('btn-write-hs');
-  const doneContacts = allContacts
-    .map((c, i) => ({ contact: c, result: results[i] }))
-    .filter(({ result }) => result && result.status === 'done');
-
-  const payload = allContacts
-    .map((c, i) => {
-      const r = results[i];
-      if (!r || r.status !== 'done' || !c.hubspot_id) return null;
-      return {
-        hubspot_id:     c.hubspot_id,
-        track:          overrides[i] ? (overrides[i] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track,
-        score:          r.score,
-        hook:           hookEdits[i] !== undefined ? hookEdits[i] : (r.hook || ''),
-        recommendation: r.recommendation || '',
-        track_reason:   r.track_reason || '',
-        connections:    r.connections || [],
-        override:       !!overrides[i],
-        override_note:  overrides[i] ? (r._override_note || '') : '',
-        notes:          notes[i] || ''
-      };
-    })
-    .filter(Boolean);
-
-  if (!payload.length) { alert('No screened contacts to write.'); return; }
-  btn.textContent = 'Writing...'; btn.disabled = true;
-
-  try {
-    const resp = await fetch('/api/write-results', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ results: payload })
-    });
-    const data = await resp.json();
-    btn.textContent = `✓ ${data.updated} written`;
-    if (BATCH_ID) {
-      try {
-        const screened = Object.values(results).filter(r => r && r.status === 'done').length;
-        const personal = allContacts.filter((c, i) => {
-          const r = results[i];
-          if (!r || r.status !== 'done') return false;
-          const track = overrides[i] ? (overrides[i] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track;
-          return track === 'Personal Outreach';
-        }).length;
-        const standard = screened - personal;
-        await window.storage.set('screener_status_' + BATCH_ID, JSON.stringify({
-          status: 'screened', screened, total: allContacts.length, personal, standard,
-          timestamp: new Date().toISOString()
-        }));
-        await updateBatchHistoryStatus(BATCH_ID, screened, personal, standard, false);
-      } catch(e) {}
-    }
-    setTimeout(() => { btn.textContent = '↑ Write to HubSpot'; btn.disabled = false; }, 3000);
-  } catch(e) {
-    btn.textContent = 'Error'; btn.disabled = false;
-    console.error(e);
-  }
-}
-
-async function pushToReplyIo() {
-  const btn = document.getElementById('btn-push-reply');
-
-  // Load stored sequence IDs
-  let personalSeqId = '', standardSeqId = '';
-  try {
-    const seqData = await window.storage.get('replyio_sequences').catch(()=>null);
-    if (seqData && seqData.value) {
-      const seqs = JSON.parse(seqData.value);
-      personalSeqId = seqs.personal || '';
-      standardSeqId = seqs.standard || '';
-    }
-  } catch(e) {}
-
-  // Fall back to prompt if not configured
-  if (!personalSeqId || !standardSeqId) {
-    const msg = 'Reply.io sequence IDs not configured.\n\nGo to Criteria & Weights tab → Reply.io Sequences → enter your IDs and Save All.\n\nEnter Personal Outreach sequence ID now (or cancel):';
-    personalSeqId = prompt(msg);
-    if (!personalSeqId) return;
-    standardSeqId = prompt('Standard Sequence sequence ID:');
-    if (!standardSeqId) return;
-  }
-
-  const contacts = allContacts
-    .map((c, i) => {
-      const r = results[i];
-      if (!r || r.status !== 'done' || !c.email) return null;
-      const track = overrides[i] ? (overrides[i] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track;
-      return {
-        email:     c.email,
-        firstName: c.firstName,
-        lastName:  c.lastName,
-        track,
-        hook: hookEdits[i] !== undefined ? hookEdits[i] : (r.hook || '')
-      };
-    })
-    .filter(Boolean);
-
-  if (!contacts.length) { alert('No screened contacts with emails to push.'); return; }
-  btn.textContent = 'Pushing...'; btn.disabled = true;
-
-  try {
-    const resp = await fetch('/api/push-replyio', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contacts,
-        personal_sequence_id: parseInt(personalSeqId),
-        standard_sequence_id: parseInt(standardSeqId)
-      })
-    });
-    const data = await resp.json();
-    if (data.ok) {
-      btn.textContent = `✓ ${data.enrolled} enrolled`;
-      btn.style.background = 'rgba(76,175,125,0.15)';
-      btn.style.color = 'var(--green)';
-      btn.style.borderColor = 'rgba(76,175,125,0.3)';
-      // Mark batch as pushed in storage
-      if (BATCH_ID) {
-        try {
-          const p = contacts.filter(c => c.track === 'Personal Outreach').length;
-          const s = contacts.filter(c => c.track === 'Standard Sequence').length;
-          await window.storage.set('screener_status_' + BATCH_ID, JSON.stringify({
-            status: 'pushed', enrolled: data.enrolled, personal: p, standard: s,
-            timestamp: new Date().toISOString()
-          }));
-          await updateBatchHistoryStatus(BATCH_ID, contacts.length, p, s, true);
-        } catch(e) {}
-      }
-      setTimeout(() => {
-        btn.textContent = '→ Push to Reply.io';
-        btn.style.background = '';
-        btn.style.color = '';
-        btn.style.borderColor = '';
-        btn.disabled = false;
-      }, 4000);
-    } else {
-      btn.textContent = `⚠ ${data.failed} failed`;
-      btn.disabled = false;
-    }
-  } catch(e) {
-    btn.textContent = 'Error'; btn.disabled = false;
-    console.error(e);
-  }
-}
-let results = {};
-let overrides = {};   // index -> true/false
-let notes = {};       // index -> string
-let hookEdits = {};   // index -> string (edited hook)
-let isProcessing = false;
-let shouldStop = false;
-let currentFilter = 'all';
-let currentSort = 'default'; // default, score, name, industry
-let personalCount = 0;
-let standardCount = 0;
-let processedCount = 0;
-let modalIndex = null;
-let l1Times = [];   // ms per contact
-let batchStartTime = null;
-let autoResumeTimer = null;
-
-// ─── ADAPTIVE DELAY ───────────────────────────────────────────────────────
-// Starts at 2s. Steps up on rate limit. Steps down after 5 consecutive successes.
-// Once a rate limit is hit, records the "floor" and never goes below floor+2s.
-const DELAY_STEPS = [2000, 3000, 4000, 5000, 6000, 8000, 10000, 15000, 20000, 30000];
-let currentDelayIdx = 0;       // index into DELAY_STEPS
-let consecutiveSuccesses = 0;  // successes at current delay
-let rateLimitFloorIdx = -1;    // index of delay where rate limit was last hit (-1 = never)
-const STEP_DOWN_AFTER = 5;     // successes before trying faster
-
-function getCurrentDelay() { return DELAY_STEPS[currentDelayIdx]; }
-
-function onRateLimitHit() {
-  // Record floor  -  never go faster than this index + 1
-  rateLimitFloorIdx = currentDelayIdx;
-  // Step up 2 levels from current (or go to max)
-  currentDelayIdx = Math.min(DELAY_STEPS.length - 1, currentDelayIdx + 2);
-  consecutiveSuccesses = 0;
-  updateDelayDisplay();
-}
-
-function onContactSuccess() {
-  consecutiveSuccesses++;
-  if (consecutiveSuccesses >= STEP_DOWN_AFTER) {
-    consecutiveSuccesses = 0;
-    // Step down  -  but not below floor+1 (buffer of 1 step above where limit hit)
-    const floor = rateLimitFloorIdx >= 0 ? rateLimitFloorIdx + 1 : 0;
-    if (currentDelayIdx > floor) {
-      currentDelayIdx--;
-    }
-  }
-  updateDelayDisplay();
-}
-
-function updateDelayDisplay() {
-  const el = DOM['delayDisplay'];
-  if (!el) return;
-  const ms = getCurrentDelay();
-  const s = (ms / 1000).toFixed(0);
-  const atFloor = rateLimitFloorIdx >= 0 && currentDelayIdx <= rateLimitFloorIdx + 1;
-  el.textContent = s + 's' + (atFloor ? ' 🔒' : '');
-  el.style.color = currentDelayIdx <= 1 ? 'var(--green)' :
-                   currentDelayIdx <= 3 ? 'var(--gold)' : 'var(--amber)';
-}
-let tokenTotals = { input: 0, output: 0 };
-
-function addTokenUsage(inputTok, outputTok) {
-  tokenTotals.input  += (inputTok  || 0);
-  tokenTotals.output += (outputTok || 0);
-  tokenTotals.count  = (tokenTotals.count || 0) + 1;
-  const total = tokenTotals.input + tokenTotals.output;
-  // Cost: $3/1M input, $15/1M output (Sonnet pricing)
-  const cost = (tokenTotals.input * 3 / 1_000_000) + (tokenTotals.output * 15 / 1_000_000);
-  // Bar scales to ~200 contacts * ~2200 tokens avg = 440k token budget
-  const pct = Math.min(100, (total / 440_000) * 100);
-  const tokEl = document.getElementById('statTokens');
-  const avgTokEl = DOM['avgTokens'];
-  if (avgTokEl && tokenTotals.count > 0) {
-    const avg = Math.round(total / tokenTotals.count);
-    avgTokEl.textContent = avg >= 1000 ? (avg/1000).toFixed(1)+'k' : avg;
-  }
-  const barEl = document.getElementById('statTokenBar');
-  const costEl = document.getElementById('statTokenCost');
-  if (tokEl) tokEl.textContent = total >= 1000 ? (total/1000).toFixed(1)+'k' : total;
-  if (barEl) barEl.style.width = pct + '%';
-  if (costEl) costEl.textContent = '$' + cost.toFixed(2);
-}
-
-document.getElementById('statTotal').textContent = allContacts.length;
-document.getElementById('headerDesc').textContent = BATCH_ID
-  ? `Loading ${BATCH_ID}...`
-  : `${allContacts.length} contacts loaded`;
-DOM['controlTitle'].textContent = 'Loading saved results...';
-renderTable();
-
-// If batch_id in URL, load from HubSpot
-if (BATCH_ID) {
-  loadBatchFromHubSpot(BATCH_ID);
-}
-
-// Load all persistent state on startup
-(async () => {
-  try {
-    const [savedResults, savedOverrides, savedNotes, savedHooks] = await Promise.all([
-      window.storage.get('screener_results').catch(()=>null),
-      window.storage.get('screener_overrides').catch(()=>null),
-      window.storage.get('screener_notes').catch(()=>null),
-      window.storage.get('screener_hooks').catch(()=>null)
-    ]);
-    if (savedResults && savedResults.value) results = JSON.parse(savedResults.value);
-    if (savedOverrides && savedOverrides.value) overrides = JSON.parse(savedOverrides.value);
-    if (savedNotes && savedNotes.value) notes = JSON.parse(savedNotes.value);
-    if (savedHooks && savedHooks.value) hookEdits = JSON.parse(savedHooks.value);
-  } catch(e) {}
-
-  // Load search selection and trigger label edits
-  try {
-    const [savedSel, savedLabels] = await Promise.all([
-      window.storage.get('search_selected').catch(()=>null),
-      window.storage.get('trigger_labels').catch(()=>null)
-    ]);
-    if (savedSel && savedSel.value) {
-      JSON.parse(savedSel.value).forEach(id => searchSelected.add(String(id)));
-    }
-    if (savedLabels && savedLabels.value) {
-      triggerLabels = JSON.parse(savedLabels.value);
-    }
-  } catch(e) {}
-
-  // Recount
-  personalCount = 0; standardCount = 0; processedCount = 0;
-  Object.values(results).forEach(r => {
-    if (r && r.status === 'done') {
-      processedCount++;
-      if (r.track === 'Personal Outreach') personalCount++;
-      else standardCount++;
-    }
-  });
-  updateStats();
-  renderTable();
-  const remaining = allContacts.length - processedCount;
-  DOM['controlTitle'].textContent = remaining === 0 ? `Complete  -  All ${allContacts.length} Contacts Screened` : processedCount > 0 ? `${processedCount} Screened · ${remaining} Remaining` : `Ready to Screen ${allContacts.length} Contacts`;
-  DOM['controlDesc'].textContent = processedCount > 0 ? `${personalCount} Personal Outreach · ${standardCount} Standard Sequence` : 'Click Run Screener to analyze all contacts';
-})();
-
-function updateStats() {
-  // Always derive from results  -  never trust manually-tracked counters
-  recomputeCounts();
-  document.getElementById('statPersonal').textContent = personalCount;
-  document.getElementById('statStandard').textContent = standardCount;
-  document.getElementById('statProcessed').textContent = processedCount;
-  const overrideCount = Object.values(overrides).filter(Boolean).length +
-    Object.values(notes).filter(n => n && n.trim()).length;
-  document.getElementById('statOverrides').textContent = overrideCount;
-}
-
-// ─── CONFIDENCE GATE ─────────────────────────────────────────
-// Evaluates data richness BEFORE scoring  -  low-data contacts get
-// a score cap and a visual flag so you know not to trust the result.
-function getDataRichness(contact) {
-  let score = 0;
-  if (contact.firstName && contact.lastName) score += 3; // full name = most important
-  else if (contact.firstName || contact.lastName) score += 1;
-  if (contact.linkedin) score += 2;
-  if (contact.email && !/^(info|sales|admin|support|contact)@/i.test(contact.email)) score += 1;
-  if (contact.description && contact.description.length > 150) score += 1;
-  if (contact.founded) score += 1;
-  if (contact.revenue && contact.revenue !== '$<1,000,000') score += 1;
-  return score; // 0-9
-}
-
-function confidenceGateCap(contact) {
-  const r = getDataRichness(contact);
-  if (r <= 1) return 20;  // almost nothing  -  cap at 20, never Personal Outreach
-  if (r <= 3) return 35;  // sparse  -  cap just below default threshold
-  return 100;             // sufficient data  -  no cap
-}
-
-function isLowConfidenceContact(contact) {
-  return getDataRichness(contact) <= 3;
-}
-
-// ─── CONFIDENCE SCORE ───────────────────────────────────────
-function getConfidence(contact, result) {
-  // Data richness = how much the AI had to work with
-  let signals = 0;
-  if (contact.firstName || contact.lastName) signals++;
-  if (contact.linkedin) signals++;
-  if (contact.email) signals++;
-  if (contact.description && contact.description.length > 100) signals++;
-  if (contact.founded) signals++;
-  // 0-6 → 1-3 dots
-  return signals <= 1 ? 1 : signals <= 3 ? 2 : 3;
-}
-
-function confidenceHTML(conf) {
-  const cls = conf === 1 ? 'low' : conf === 2 ? 'mid' : '';
-  const label = conf === 1 ? 'Low confidence' : conf === 2 ? 'Medium' : 'High confidence';
-  const dots = [1,2,3].map(d => `<div class="confidence-dot ${d <= conf ? 'filled '+cls : ''}" title="${label}"></div>`).join('');
-  return `<div class="confidence-bar"><div class="confidence-dots">${dots}</div><span class="confidence-label">${label}</span></div>`;
-}
-
-// (DOM cache moved to top of script)
-
-// ─── CRITERIA HELPERS ────────────────────────────────────────
-function getCriteriaThreshold() {
-  return criteriaThreshold || 40;
-}
-
-function getWeightedTriggersText() {
-  return getAllTriggers().filter(t => t.label && t.label.trim()).map(t => {
-    const w = getTriggerWeight(t.id);
-    const wlabel = ['','Low','Medium','High'][w];
-    return `- ${t.label}: ${wlabel}`;
-  }).join('\n');
-}
-
-function getDefaultSearchSelected() {
-  // Default: top 4 weight-2+ triggers by weight, matching the keyword map
-  const keywordMap = [
-    { patterns: [/immigrant|soviet|eastern europe|immigrat|foreign.born|first.gen/i], terms: 'immigrant "came to America" "born in" "moved to the US"' },
-    { patterns: [/military|veteran|army|navy|marine|air force|coast guard|national guard|ranger|infantry|combat|deployed|service member/i], terms: 'military veteran "national guard" army navy deployed' },
-    { patterns: [/single parent|bootstrapped upbringing|single mother|single father/i], terms: '"single parent" "single mother" bootstrapped' },
-    { patterns: [/sacramento|antelope valley|san fernando/i], terms: 'Sacramento "Antelope Valley" "San Fernando"' },
-    { patterns: [/UCLA|UC Berkeley|berkeley|bruin/i], terms: 'UCLA "UC Berkeley" alumni' },
-    { patterns: [/government|public sector|civil service|state.*employ|federal.*employ/i], terms: 'government "public sector" "civil service"' },
-    { patterns: [/scratch|limited resources|nothing|bootstrapped business/i], terms: '"started from scratch" bootstrapped "built from nothing"' },
-    { patterns: [/government.*client|military.*client|government.*contract|military.*contract/i], terms: '"government contract" "military contract" "public sector client"' },
-    { patterns: [/retirement|succession|exit|no.*heir|no.*successor/i], terms: 'retirement succession "exit plan" founder' },
-    { patterns: [/endurance|marathon|triathlon|cycling|ironman/i], terms: 'marathon triathlon "endurance athlete" cycling' },
-    { patterns: [/civic|political|community leader|chamber|city council|nonprofit/i], terms: 'civic community "city council" chamber nonprofit' },
-    { patterns: [/employee|workforce|culture|long.tenured/i], terms: '"employee culture" workforce "long-tenured"' },
-    { patterns: [/disability|developmental|human services|social services/i], terms: '"disability services" developmental "human services"' },
-  ];
-
-  const triggers = getAllTriggers()
-    .filter(t => t.label && t.label.trim())
-    .map(t => ({ ...t, w: getTriggerWeight(t.id) }))
-    .sort((a, b) => b.w - a.w);
-
-  const selected = new Set();
-  for (const trigger of triggers) {
-    if (trigger.w < 2) continue;
-    for (const entry of keywordMap) {
-      if (entry.patterns.some(p => p.test(trigger.label))) {
-        selected.add(String(trigger.id));
-        break;
-      }
-    }
-    if (selected.size >= SEARCH_SELECT_MAX) break;
-  }
-  return selected;
-}
-
-// Map trigger id -> search terms
-const TRIGGER_KEYWORD_MAP = [
-  { id: 1,  patterns: [/immigrant|soviet|eastern europe|immigrat|foreign.born|first.gen/i], terms: 'immigrant "first generation" Soviet' },
-  { id: 2,  patterns: [/military|veteran|army|navy|marine|air force|coast guard|national guard|ranger|infantry|combat|deployed|service member/i], terms: 'military veteran army deployed' },
-  { id: 3,  patterns: [/single parent|bootstrapped upbringing|single mother|single father/i], terms: '"single parent" bootstrapped' },
-  { id: 4,  patterns: [/sacramento|antelope valley|san fernando/i], terms: 'Sacramento California' },
-  { id: 5,  patterns: [/UCLA|UC Berkeley|berkeley|bruin/i], terms: 'UCLA "UC Berkeley"' },
-  { id: 6,  patterns: [/government|public sector|civil service|state.*employ|federal.*employ/i], terms: 'government "public sector"' },
-  { id: 7,  patterns: [/scratch|limited resources|nothing|bootstrapped business/i], terms: '"started from scratch" bootstrapped' },
-  { id: 8,  patterns: [/government.*client|military.*client|government.*contract|military.*contract/i], terms: '"government contract" military federal' },
-  { id: 9,  patterns: [/retirement|succession|exit|no.*heir|no.*successor/i], terms: 'retirement succession founder' },
-  { id: 10, patterns: [/first.gen.*immigrant|immigrant.*built|came to america.*built/i], terms: '"first generation" immigrant founder' },
-  { id: 11, patterns: [/sacramento area/i], terms: 'Sacramento' },
-  { id: 12, patterns: [/endurance|marathon|triathlon|cycling|ironman/i], terms: 'marathon triathlon cycling' },
-  { id: 13, patterns: [/civic|political|community leader|chamber|city council|nonprofit/i], terms: 'civic nonprofit "community leader"' },
-  { id: 14, patterns: [/employee|workforce|culture|long.tenured/i], terms: '"employee culture" workforce' },
-  { id: 15, patterns: [/disability|developmental|human services|social services/i], terms: '"disability services" "human services"' },
-];
-
-function getTermsForTrigger(trigger) {
-  // Check id map first
-  const byId = TRIGGER_KEYWORD_MAP.find(e => e.id === trigger.id || e.id === parseInt(trigger.id));
-  if (byId) return byId.terms;
-  // Fallback: match label patterns
-  for (const entry of TRIGGER_KEYWORD_MAP) {
-    if (entry.patterns.some(p => p.test(trigger.label))) return entry.terms;
-  }
-  // Last resort: use first 3 words of label as search terms
-  return trigger.label.split(' ').slice(0, 4).join(' ');
-}
-
-function getSearch2Terms() {
-  // Use searchSelected if populated, otherwise fall back to defaults
-  const selected = searchSelected.size > 0 ? searchSelected : getDefaultSearchSelected();
-  const triggers = getAllTriggers().filter(t => selected.has(String(t.id)));
-  // Cap at 3 term groups to keep query tight and fast
-  const termParts = triggers.map(t => getTermsForTrigger(t)).filter(Boolean).slice(0, 3);
-  if (termParts.length === 0) return 'background founder history';
-  return termParts.join(' OR ');
-}
-
-function toggleSearchSelect(id) {
-  const sid = String(id);
-  if (searchSelected.has(sid)) {
-    searchSelected.delete(sid);
-  } else {
-    if (searchSelected.size >= SEARCH_SELECT_MAX) return; // cap at 4
-    searchSelected.add(sid);
-  }
-  renderCriteriaPage();
-  saveSearchSelected();
-}
-
-async function saveSearchSelected() {
-  try { await window.storage.set('search_selected', JSON.stringify([...searchSelected])); } catch(e) {}
-}
-function getProfileText() {
-  // Use profileCache  -  always up to date (loaded from storage, updated on Save All)
-  // Also read live DOM values if criteria page is open
-  const bgEl = document.getElementById('profileBackground');
-  const p = bgEl ? {
-    background: bgEl.value,
-    location: document.getElementById('profileLocation').value,
-    military: document.getElementById('profileMilitary').value,
-    education: document.getElementById('profileEducation').value,
-    other: document.getElementById('profileOther').value
-  } : profileCache;
-  return `STEVEN PAVLOV  -  BACKGROUND FOR CONNECTION ANALYSIS
-- Background: ${p.background}
-- Location: ${p.location}
-- Military: ${p.military}
-- Education: ${p.education}
-- Other: ${p.other}
-
-KEY CONNECTION TRIGGERS (things that warrant a personal email vs standard sequence):
-${getWeightedTriggersText()}`;
-}
-
-function getFeedbackText() {
-  if (!feedbackItems || feedbackItems.length === 0) return '';
-  return '\nCalibration notes from previous runs:\n' + feedbackItems.map(f => `- ${f}`).join('\n');
-}
-
-// ─── SCREEN CONTACT (pure  -  no DOM, no side effects) ─────────
-// Returns: { ok, result, debug, meta }
-async function screenContact(contact) {
-  const t0 = Date.now();
-  const name = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Unknown owner';
-  const hasFullName = !!(contact.firstName && contact.lastName);
-  const hasName = !!(contact.firstName || contact.lastName);
-  const retries = 2;
-
-  const debug = {
-    search1: `${name} ${contact.company}`,
-    search2: hasFullName ? `${name} ${contact.company} ${getSearch2Terms()}` : null,
-    search2_skipped: !hasFullName,
-    stop_reasons: [],
-    parse_salvaged: false,
-    parse_failed: false
-  };
-
-  const prompt = `You are helping Steven Pavlov screen acquisition targets. Analyze the connection between Steven's background and this owner/company.
-
-${getProfileText()}
+    return {k: v for k, v in props.items() if v}
+
+def _write_to_hs(hubspot_id, result):
+    props = _build_hs_props(result)
+    resp = requests.patch(f'{HUBSPOT_BASE}/crm/v3/objects/contacts/{hubspot_id}',
+                          headers=hs_headers(), json={'properties': props}, timeout=15)
+    return resp.ok, (None if resp.ok else f"HTTP {resp.status_code}: {resp.text[:200]}")
+
+# ── Screening prompt builder ──────────────────────────────────────────────────
+def _build_prompt(contact, criteria):
+    name = ' '.join(filter(None, [contact.get('firstName',''), contact.get('lastName','')])) or 'Unknown owner'
+    has_full = bool(contact.get('firstName') and contact.get('lastName'))
+    threshold     = criteria.get('threshold', 40)
+    profile       = criteria.get('profile', {})
+    weights       = criteria.get('weights', [])
+    feedback      = criteria.get('feedback', [])
+    search2_terms = criteria.get('search2_terms', '')
+
+    wlabels = ['','Low','Medium','High']
+    weights_text = '\n'.join(
+        f"- {w['label']}: {wlabels[min(w.get('weight',1),3)]}"
+        for w in weights if w.get('label','').strip()
+    )
+    profile_parts = [f"{k.title()}: {v}" for k, v in profile.items() if v]
+    profile_text = ("Steven Pavlov's profile:\n" + '\n'.join(profile_parts)) if profile_parts else \
+        "Steven Pavlov is a Sacramento-area acquisition entrepreneur who buys and operates small businesses."
+    feedback_text = ('\nCalibration notes from previous runs:\n' + '\n'.join(f"- {f}" for f in feedback)) if feedback else ''
+    search2_line = (
+        f'2. "{name} {contact.get("company","")} {search2_terms}" — targeted at personal connection signals. Only run if you have both first AND last name.'
+        if has_full else
+        '(Search 2 skipped — no full owner name. Score on search 1 and Grata data.)'
+    )
+
+    prompt = f"""You are helping Steven Pavlov screen acquisition targets. Analyze the connection between Steven's background and this owner/company.
+
+{profile_text}
 
 Contact:
-- Name: ${name} (${contact.jobTitle})
-- Company: ${contact.company}
-- Industry: ${contact.industry}
-- Location: ${contact.location}
-- Description: ${contact.description}
-- LinkedIn: ${contact.linkedin}
-- Key People: ${contact.keyPeople}
-- Revenue: ${contact.revenue}
-- Founded: ${contact.founded}
+- Name: {name} ({contact.get('jobTitle','')})
+- Company: {contact.get('company','')}
+- Industry: {contact.get('industry','')}
+- Location: {contact.get('location','')}
+- Description: {contact.get('description','')}
+- LinkedIn: {contact.get('linkedin','')}
+- Revenue: {contact.get('revenue','')}
+- Founded: {contact.get('founded','')}
 
 Respond ONLY with raw JSON (no markdown):
-{"score":<0-100>,"track":"Personal Outreach" or "Standard Sequence","track_reason":"<1 sentence  -  the single most decisive factor in the track decision>","connections":[{"strength":"strong" or "moderate" or "weak","basis":"confirmed" or "inferred","type":"<short category>","description":"<one sentence>","sourceUrl":"<exact URL where you found this fact, or empty string if not from a specific web page>"}],"recommendation":"<1-2 sentences>","hook":"<if Personal Outreach: 2 sentence personal opening for Steven's email. If Standard Sequence: empty string>","industryCluster":"<1-3 word industry group e.g. Fire Protection, HVAC, Safety Consulting, Security Systems>"}
+{{"score":<0-100>,"track":"Personal Outreach" or "Standard Sequence","track_reason":"<1 sentence>","connections":[{{"strength":"strong|moderate|weak","basis":"confirmed|inferred","type":"<short category>","description":"<one sentence>","sourceUrl":"<URL or empty string>"}}],"recommendation":"<1-2 sentences>","hook":"<2 sentence opener if Personal Outreach, else empty string>","industryCluster":"<1-3 word group>"}}
 
-Rules: score>${getCriteriaThreshold()} = Personal Outreach. Only include real connection points. basis="confirmed" means you found direct evidence; basis="inferred" means you are reasoning from indirect signals. For sourceUrl: only include a URL if you found the fact on a specific web page during this search session  -  never guess or hallucinate URLs.
+Rules: score>{threshold} = Personal Outreach. basis="confirmed" means direct evidence found; "inferred" means reasoning from signals. Only include real connection points. Never hallucinate URLs.
 
 Connection signal weights (1=low bonus, 2=medium, 3=strong upgrade trigger):
-${getWeightedTriggersText()}
-${getFeedbackText()}
+{weights_text}
+{feedback_text}
 
-If web search available, run searches before scoring (keep it fast):
-1. "[owner name] [company name]"  -  general background, company story, owner bio
-${hasFullName ? `2. "[owner name] [company name] ${getSearch2Terms()}"  -  targeted at personal connection signals. Only run this if you have both first AND last name for the owner.` : '(Search 2 skipped  -  no full owner name available. Score on what you find in search 1 and the Grata data.)'}
+Run web searches before scoring:
+1. "{name} {contact.get('company','')}" — general background and owner bio
+{search2_line}
 
-Pay special attention to signals matching the connection triggers above. Also note: California roots (Sacramento, Antelope Valley, San Fernando Valley) are always relevant to Steven.`;
+Pay special attention to: California roots (Sacramento, Antelope Valley, San Fernando Valley), military/veteran background, immigrant background, bootstrapped origin story."""
 
-  const apiKey = await ensureApiKey();
-  if (!apiKey) {
-    // No API key  -  fall back to heuristic, mark clearly
-    const hResult = heuristicScreen(contact);
-    return {
-      ok: true,
-      result: { ...hResult, heuristic: true },
-      debug,
-      meta: { retries: 0, duration_ms: Date.now() - t0, used_tools: false, parse_salvaged: false, heuristic: true }
-    };
-  }
+    return prompt, has_full
 
-  dbg('--- SCREEN START:', name, '@', contact.company);
-  dbg('Search 1:', debug.search1);
-  if (hasFullName) dbg('Search 2 terms:', getSearch2Terms());
-  else dbg('Search 2: SKIPPED  -  no full name');
+def _parse_result(text):
+    text = text.strip()
+    if text.startswith('```'):
+        lines = text.split('\n')
+        text = '\n'.join(lines[1:-1] if lines[-1].strip() == '```' else lines[1:])
+    start, end = text.find('{'), text.rfind('}')
+    if start >= 0 and end > start:
+        try:
+            return json.loads(text[start:end+1])
+        except json.JSONDecodeError:
+            pass
+    return None
 
-  const requestBody = {
-    model: CONFIG.anthropicModel, max_tokens: 1200,
-    messages: [{ role: 'user', content: prompt }]
-  };
-  if (hasName) requestBody.tools = [{ type: 'web_search_20250305', name: 'web_search' }];
+def _screen_one(contact, criteria):
+    prompt, has_name = _build_prompt(contact, criteria)
+    body = {
+        'model': 'claude-sonnet-4-20250514',
+        'max_tokens': 1200,
+        'messages': [{'role': 'user', 'content': prompt}]
+    }
+    if has_name:
+        body['tools'] = [{'type': 'web_search_20250305', 'name': 'web_search'}]
 
-  let lastError = null;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const fetchPromise = fetch('/api/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': CONFIG.anthropicVersion
-        },
-        body: JSON.stringify(requestBody)
-      });
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('STALL_TIMEOUT')), 180000)
-      );
-      const resp = await Promise.race([fetchPromise, timeoutPromise]);
+    for attempt in range(3):
+        resp = requests.post(f'{ANTHROPIC_BASE}/v1/messages',
+                             headers=anthropic_headers(), json=body, timeout=180)
+        if resp.status_code == 429:
+            time.sleep((attempt + 1) * 30)
+            continue
+        if not resp.ok:
+            raise Exception(f"Anthropic {resp.status_code}: {resp.text[:300]}")
+        data = resp.json()
+        if data.get('error'):
+            raise Exception(data['error'].get('message', 'API error'))
+        text = '\n'.join(b['text'] for b in data.get('content', []) if b.get('type') == 'text')
+        result = _parse_result(text)
+        if result:
+            return result
+        raise Exception(f"JSON parse failed: {text[:300]}")
+    raise Exception("All attempts failed")
 
-      // Rate limit  -  signal to orchestrator, don't handle UI here
-      if (resp.status === 429) {
-        const wait = (attempt + 1) * 30000;
-        await new Promise(r => setTimeout(r, wait));
-        continue;
-      }
+# ── Background job runner ─────────────────────────────────────────────────────
+def _run_job(job_id, contacts, criteria):
+    with JOBS_LOCK:
+        JOBS[job_id]['status'] = 'running'
 
-      if (!resp.ok) {
-        const errData = await resp.json().catch(() => ({}));
-        throw new Error(errData?.error?.message || `HTTP ${resp.status}`);
-      }
+    processed, errors = 0, []
 
-      const data = await resp.json();
-      if (data.error) throw new Error(data.error.message || 'API error');
+    for i, contact in enumerate(contacts):
+        # Skip already screened
+        if contact.get('existing_track') and contact.get('existing_score'):
+            with JOBS_LOCK:
+                JOBS[job_id]['skipped'] = JOBS[job_id].get('skipped', 0) + 1
+            continue
 
-      debug.stop_reasons.push(data.stop_reason || 'unknown');
-      if (data.usage) {
-        debug.tokens = data.usage;
-        addTokenUsage(data.usage.input_tokens, data.usage.output_tokens);
-      }
+        name = f"{contact.get('firstName','')} {contact.get('lastName','')} @ {contact.get('company','')}".strip()
+        with JOBS_LOCK:
+            JOBS[job_id]['current_contact'] = name
+            JOBS[job_id]['current_index']   = i
 
-      // Extract all block types
-      const contentBlocks = data.content || [];
-      const textBlocks = contentBlocks.filter(b => b.type === 'text');
-      const toolUseBlocks = contentBlocks.filter(b => b.type === 'tool_use');
-      const toolResultBlocks = contentBlocks.filter(b => b.type === 'tool_result');
-      debug.used_tools = toolUseBlocks.length > 0;
-      debug.tool_names = toolUseBlocks.map(b => b.name);
+        try:
+            result = _screen_one(contact, criteria)
+            ok, err = _write_to_hs(contact['hubspot_id'], result)
+            if not ok:
+                errors.append({'contact': name, 'error': f'HubSpot: {err}'})
+            processed += 1
+            with JOBS_LOCK:
+                JOBS[job_id]['processed'] = processed
+                JOBS[job_id]['results'][contact['hubspot_id']] = result
+        except Exception as e:
+            errors.append({'contact': name, 'error': str(e)})
+            processed += 1
+            with JOBS_LOCK:
+                JOBS[job_id]['processed'] = processed
+                JOBS[job_id]['errors']    = errors
 
-      // Extract search result snippets from tool_result blocks for the debug drawer
-      debug.search_results = [];
-      for (const block of toolResultBlocks) {
-        try {
-          const content = Array.isArray(block.content) ? block.content : [block.content];
-          for (const item of content) {
-            const text = typeof item === 'string' ? item : (item?.text || '');
-            if (!text) continue;
-            // Parse search results  -  each result is typically a JSON array or structured text
-            try {
-              const parsed = JSON.parse(text);
-              if (Array.isArray(parsed)) {
-                parsed.slice(0, 5).forEach(r => {
-                  if (r.url || r.title) debug.search_results.push({ title: r.title || '', url: r.url || '', snippet: (r.snippet || r.description || '').slice(0, 150) });
-                });
-              }
-            } catch {
-              // Plain text results  -  extract URLs and titles via regex
-              const lines = text.split('\n').filter(l => l.trim()).slice(0, 10);
-              lines.forEach(l => {
-                const urlMatch = l.match(/https?:\/\/[^\s]+/);
-                if (urlMatch) debug.search_results.push({ title: l.replace(urlMatch[0], '').trim().slice(0, 80), url: urlMatch[0], snippet: '' });
-              });
-            }
-          }
-        } catch(e) { /* non-critical  -  skip */ }
-      }
+        if i < len(contacts) - 1:
+            time.sleep(2)
 
-      // No Final Answer: tool loop ran but produced no text block
-      // Fix: send a follow-up message nudging the model to write its JSON output
-      if (toolUseBlocks.length > 0 && textBlocks.length === 0) {
-        debug.no_final_answer = true;
-        dbg('No final answer — sending nudge message to complete response');
-        try {
-          // Reconstruct full conversation so far (user prompt + assistant tool use)
-          const nudgeMessages = [
-            { role: 'user', content: prompt },
-            { role: 'assistant', content: data.content }, // includes tool_use blocks
-            { role: 'user', content: 'You have completed your research. Based on everything you found, please now provide your JSON scoring output.' }
-          ];
-          const nudgeResp = await fetch('/api/messages', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': CONFIG.anthropicVersion },
-            body: JSON.stringify({ model: CONFIG.anthropicModel, max_tokens: 1200, messages: nudgeMessages })
-          });
-          if (nudgeResp.ok) {
-            const nudgeData = await nudgeResp.json();
-            if (nudgeData.usage) addTokenUsage(nudgeData.usage.input_tokens, nudgeData.usage.output_tokens);
-            const nudgeText = (nudgeData.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-            if (nudgeText && nudgeText.includes('{')) {
-              // Got a response — continue with normal parse flow
-              const nudgeCleaned = nudgeText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
-              const nudgeMatch = nudgeCleaned.match(/\{[\s\S]*\}/);
-              if (nudgeMatch) {
-                const nudgeParsed = JSON.parse(nudgeMatch[0]);
-                debug.nudge_used = true;
-                dbg('Nudge succeeded for', contact.company, '→', nudgeParsed.track);
-                return {
-                  ok: true, result: nudgeParsed, debug,
-                  meta: { retries: attempt, duration_ms: Date.now() - t0, used_tools: true, parse_salvaged: false, nudged: true }
-                };
-              }
-            }
-          }
-        } catch(nudgeErr) {
-          dbg('Nudge failed:', nudgeErr.message);
+    with JOBS_LOCK:
+        JOBS[job_id].update({
+            'status': 'done', 'done': True, 'errors': errors,
+            'processed': processed, 'current_contact': None,
+            'finished_at': time.time()
+        })
+
+# ── POST /api/screen-batch ────────────────────────────────────────────────────
+@app.route('/api/screen-batch', methods=['POST'])
+def screen_batch():
+    if not ANTHROPIC_KEY:  return jsonify({'error': 'ANTHROPIC_KEY not configured'}), 500
+    if not HUBSPOT_TOKEN:  return jsonify({'error': 'HUBSPOT_TOKEN not configured'}), 500
+
+    data     = request.get_json(force=True)
+    batch_id = data.get('batch_id', '').strip()
+    criteria  = data.get('criteria', {})
+    if not batch_id: return jsonify({'error': 'batch_id required'}), 400
+
+    # Reject if job already running for this batch
+    with JOBS_LOCK:
+        for jid, job in JOBS.items():
+            if job.get('batch_id') == batch_id and not job.get('done'):
+                return jsonify({'error': 'Job already running', 'job_id': jid}), 409
+
+    try:
+        contacts = _fetch_contacts(batch_id, full=False)
+    except Exception as e:
+        return jsonify({'error': f'Failed to fetch contacts: {e}'}), 500
+
+    already = sum(1 for c in contacts if c.get('existing_track') and c.get('existing_score'))
+    to_do   = len(contacts) - already
+
+    job_id = str(uuid.uuid4())[:8]
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            'job_id': job_id, 'batch_id': batch_id, 'status': 'queued',
+            'total': to_do, 'total_contacts': len(contacts),
+            'processed': 0, 'skipped': already,
+            'current_contact': None, 'current_index': 0,
+            'errors': [], 'results': {}, 'done': False,
+            'started_at': time.time(), 'finished_at': None
         }
-        // Nudge failed too — return error
-        return {
-          ok: false,
-          error_type: 'no_final_answer',
-          error_message: 'Tool loop completed but no final text response was returned',
-          debug,
-          meta: { retries: attempt, duration_ms: Date.now() - t0, used_tools: true, parse_salvaged: false }
-        };
-      }
 
-      const text = textBlocks.map(b => b.text).join('');
-      const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
-      const match = cleaned.match(/\{[\s\S]*\}/);
-
-      if (!match) {
-        throw new Error('No JSON in response');
-      }
-
-      // Attempt 1: clean parse
-      try {
-        const parsed = JSON.parse(match[0]);
-        dbg('Result:', contact.company, '→', parsed.track, '| Score:', parsed.score);
-        dbg('Connections:', (parsed.connections||[]).map(c => `${c.strength}: ${c.type}`).join(', ') || 'none');
-        return {
-          ok: true,
-          result: parsed,
-          debug,
-          meta: { retries: attempt, duration_ms: Date.now() - t0, used_tools: hasName, parse_salvaged: false }
-        };
-      } catch(parseErr) {
-        // Attempt 2: salvage common issues
-        try {
-          let raw = match[0];
-          raw = raw.replace(/([^\\])'(?=[^,:\[\]{}"]*")/g, "$1\\'");
-          raw = raw.replace(/,\s*([}\]])/g, '$1');
-          raw = raw.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
-          const parsed = JSON.parse(raw);
-          debug.parse_salvaged = true;
-          debug.raw_response = match[0].slice(0, 500);
-          dbg('Parse salvaged for', contact.company);
-          return {
-            ok: true,
-            result: parsed,
-            debug,
-            meta: { retries: attempt, duration_ms: Date.now() - t0, used_tools: hasName, parse_salvaged: true }
-          };
-        } catch(e2) {
-          // Attempt 3: partial recovery  -  score + track only
-          const scoreMatch = match[0].match(/"score"\s*:\s*(\d+)/);
-          const trackMatch = match[0].match(/"track"\s*:\s*"([^"]+)"/);
-          const clusterMatch = match[0].match(/"industryCluster"\s*:\s*"([^"]+)"/);
-          if (scoreMatch && trackMatch) {
-            debug.parse_salvaged = true;
-            debug.raw_response = match[0].slice(0, 500); // store for debugging
-            dbg('Partial parse recovery for', contact.company);
-            return {
-              ok: true,
-              result: {
-                score: parseInt(scoreMatch[1]),
-                track: trackMatch[1],
-                connections: [],
-                recommendation: '',
-                hook: '',
-                industryCluster: clusterMatch ? clusterMatch[1] : ''
-              },
-              debug,
-              meta: { retries: attempt, duration_ms: Date.now() - t0, used_tools: hasName, parse_salvaged: true, partial: true }
-            };
-          }
-          // Total parse failure  -  store raw for debugging
-          debug.parse_failed = true;
-          debug.raw_response = match[0].slice(0, 500);
-          return {
-            ok: false,
-            error_type: 'parse_error',
-            error_message: parseErr.message,
-            debug,
-            meta: { retries: attempt, duration_ms: Date.now() - t0, used_tools: hasName, parse_salvaged: false }
-          };
-        }
-      }
-    } catch(e) {
-      lastError = e;
-      const isStall = e.message === 'STALL_TIMEOUT';
-      const waitTime = isStall ? 20000 : 10000;
-      dbg(`screenContact ${isStall ? 'stalled' : 'errored'} for ${contact.company} (attempt ${attempt+1}):`, e.message);
-      if (attempt < retries) {
-        await new Promise(r => setTimeout(r, waitTime));
-      }
-    }
-  }
-
-  // All retries exhausted
-  return {
-    ok: false,
-    error_type: lastError?.message === 'STALL_TIMEOUT' ? 'timeout' : 'api_error',
-    error_message: lastError?.message || 'Unknown error',
-    debug,
-    meta: { retries, duration_ms: Date.now() - t0, used_tools: hasName, parse_salvaged: false }
-  };
-}
-
-// ─── SAVE / LOAD ─────────────────────────────────────────────
-async function saveResults() {
-  try { await window.storage.set('screener_results', JSON.stringify(results)); } catch(e) {}
-}
-async function saveOverrides() {
-  try { await window.storage.set('screener_overrides', JSON.stringify(overrides)); } catch(e) {}
-  updateStats();
-}
-async function saveNotes() {
-  try { await window.storage.set('screener_notes', JSON.stringify(notes)); } catch(e) {}
-  updateStats();
-}
-async function saveHooks() {
-  try { await window.storage.set('screener_hooks', JSON.stringify(hookEdits)); } catch(e) {}
-}
-
-function hardReset() { clearResults(); }
-
-async function clearResults() {
-  const ok = await showConfirm('Clear All Results', 'Clear ALL results, overrides, and notes? This cannot be undone.', 'Clear Everything', 'Cancel');
-  if (!ok) return;
-
-  // Nuke storage first  -  set empty values synchronously before anything else
-  const keys = ['screener_results','screener_overrides','screener_notes','screener_hooks'];
-  await Promise.allSettled(keys.map(k => window.storage.set(k, '{}')));
-  await Promise.allSettled(keys.map(k => window.storage.delete(k)));
-
-  // Clear all in-memory state
-  results = {}; overrides = {}; notes = {}; hookEdits = {};
-  personalCount = 0; standardCount = 0; processedCount = 0;
-  isProcessing = false; shouldStop = false;
-  l1Times = []; batchStartTime = null;
-  if (autoResumeTimer) { clearInterval(autoResumeTimer); autoResumeTimer = null; }
-
-  // Reset UI
-  updateStats();
-  DOM['controlTitle'].textContent = `Ready to Screen ${allContacts.length} Contacts`;
-  DOM['controlDesc'].textContent = 'Click Run Screener to analyze all contacts';
-  DOM['concurrencyNote'].textContent = '';
-  DOM['btnRun'].textContent = 'Run Screener';
-  DOM['btnRun'].disabled = false;
-  DOM['btnStop'].style.display = 'none';
-  DOM['progressBar'].style.display = 'none';
-  DOM['progressFill'].style.width = '0%';
-  renderTable();
-}
-
-// ─── PROCESS ─────────────────────────────────────────────────
-function updateTimingDisplay(remaining) {
-  if (l1Times.length === 0) return;
-  const avg = Math.round(l1Times.reduce((a,b) => a+b, 0) / l1Times.length);
-  const avgSec = (avg / 1000).toFixed(1);
-  // Estimate uses current delay and 2-parallel batches
-  const estMs = remaining * (avg + getCurrentDelay());
-  const estMin = Math.round(estMs / 60000);
-  const elapsedMin = Math.round((Date.now() - batchStartTime) / 60000);
-  DOM['avgL1'].textContent = avgSec + 's';
-  DOM['estRemaining'].textContent = estMin > 0 ? estMin + ' min' : '< 1 min';
-  DOM['elapsed'].textContent = elapsedMin + ' min';
-  updateDelayDisplay();
-}
-
-async function startProcessing() {
-  if (isProcessing) return;
-  isProcessing = true; shouldStop = false;
-
-  recomputeCounts();
-
-  const unscreened = [];
-  for (let i = 0; i < Math.min(100, allContacts.length); i++) {
-    if (!results[i] || results[i].status !== 'done') unscreened.push(i);
-  }
-
-  if (unscreened.length === 0) {
-    await showAlert('All contacts already screened. Click Clear to re-screen.');
-    isProcessing = false; return;
-  }
-
-  // Reset adaptive delay for new run
-  currentDelayIdx = 0;
-  consecutiveSuccesses = 0;
-  rateLimitFloorIdx = -1;
-
-  batchStartTime = Date.now();
-  DOM['timingBar'].style.display = 'flex';
-  DOM['btnRun'].disabled = true;
-  DOM['btnStop'].style.display = 'block';
-  DOM['progressBar'].style.display = 'block';
-  updateDelayDisplay();
-  DOM['concurrencyNote'].textContent = `1 at a time · adaptive delay · ${unscreened.length} remaining`;
-
-  // 1 contact at a time with adaptive delay
-  for (let i = 0; i < unscreened.length; i++) {
-    if (shouldStop) break;
-
-    const index = unscreened[i];
-    results[index] = { status: 'processing' };
-    renderRow(index);
-    DOM['concurrencyNote'].textContent = `Contact ${i + 1} of ${unscreened.length} · ${unscreened.length - i - 1} remaining · Delay: ${(getCurrentDelay()/1000).toFixed(0)}s`;
-
-    const _t0 = Date.now();
-    let gotRateLimit = false;
-    try {
-      const envelope = await screenContact(allContacts[index]);
-      l1Times.push(Date.now() - _t0);
-
-      if (!envelope.ok) {
-        if (envelope.error_type === 'rate_limit') gotRateLimit = true;
-        results[index] = {
-          status: 'done', track: 'Standard Sequence', score: 0,
-          connections: [], recommendation: '', hook: '', industryCluster: '',
-          screenFailed: true,
-          failReason: envelope.error_type === 'no_final_answer' ? 'no_final_answer' : envelope.error_message,
-          _debug: envelope.debug, _meta: envelope.meta
-        };
-      } else {
-        const result = envelope.result;
-        const cap = confidenceGateCap(allContacts[index]);
-        if (result.score > cap) { result.score = cap; result.track = 'Standard Sequence'; result.lowDataGated = true; }
-        results[index] = { status: 'done', ...result, parseSalvaged: envelope.meta.parse_salvaged || false, _debug: envelope.debug, _meta: envelope.meta };
-        if (result.track === 'Personal Outreach') personalCount++;
-        else standardCount++;
-        processedCount++;
-      }
-    } catch(e) {
-      l1Times.push(Date.now() - _t0);
-      if (e.message === 'RATE_LIMIT') gotRateLimit = true;
-      results[index] = { status: 'done', track: 'Standard Sequence', score: 0, connections: [], recommendation: '', hook: '', industryCluster: '', screenFailed: true, failReason: e.message };
-    }
-
-    if (gotRateLimit) {
-      onRateLimitHit();
-      results[index] = { status: 'pending' };
-      renderRow(index);
-      await saveResults();
-      await new Promise(r => setTimeout(r, getCurrentDelay()));
-      i--; // retry this contact
-      continue;
-    }
-
-    onContactSuccess();
-    renderRow(index);
-    updateStats();
-    updateTimingDisplay(unscreened.length - i - 1);
-    const pct = Math.round((processedCount / allContacts.length) * 100);
-    DOM['progressFill'].style.width = pct + '%';
-    DOM['progressLabel'].textContent = `${processedCount} / ${allContacts.length} screened`;
-    DOM['controlTitle'].textContent = `Screening ${processedCount} of ${allContacts.length}... (${(getCurrentDelay()/1000).toFixed(0)}s delay)`;
-    await saveResults();
-
-    if (i < unscreened.length - 1) await new Promise(r => setTimeout(r, getCurrentDelay()));
-  }
-
-  isProcessing = false;
-  DOM['btnRun'].disabled = false;
-  DOM['btnStop'].style.display = 'none';
-  DOM['concurrencyNote'].textContent = '';
-  const remaining2 = allContacts.length - processedCount;
-  if (currentSort === 'score') applySort();
-
-  if (shouldStop || remaining2 > 0) {
-    // User paused  -  don't auto-start L2
-    DOM['btnRun'].textContent = 'Resume';
-    DOM['controlTitle'].textContent = `Paused  -  ${remaining2} remaining`;
-    DOM['controlDesc'].textContent = `${personalCount} Personal Outreach · ${standardCount} Standard Sequence`;
-    return;
-  }
-
-  // L1 complete  -  compute run health summary
-  const allDone = Object.values(results).filter(r => r && r.status === 'done');
-  const failedCount = allDone.filter(r => r.screenFailed).length;
-  const recoveredCount = allDone.filter(r => !r.screenFailed && r.parseSalvaged).length;
-  const lowDataCount = allDone.filter(r => r.lowDataGated).length;
-  const cleanCount = allDone.length - failedCount - recoveredCount;
-
-  DOM['btnRun'].textContent = 'Done ✓';
-  DOM['controlTitle'].textContent = `Complete  -  ${personalCount} Personal Outreach · ${standardCount} Standard Sequence`;
-  DOM['controlDesc'].textContent = `${cleanCount} clean · ${recoveredCount > 0 ? recoveredCount + ' recovered · ' : ''}${failedCount > 0 ? failedCount + ' failed · ' : ''}${lowDataCount > 0 ? lowDataCount + ' low data · ' : ''}${allDone.length} total`;
-}
-
-function stopProcessing() {
-  shouldStop = true; isProcessing = false;
-  DOM['btnRun'].disabled = false;
-  DOM['btnStop'].style.display = 'none';
-  DOM['concurrencyNote'].textContent = '';
-  DOM['controlTitle'].textContent = 'Paused  -  click Run Screener to continue';
-}
-
-// ─── HELPERS ─────────────────────────────────────────────────
-// Single source of truth for counts  -  derive from results object
-function recomputeCounts() {
-  personalCount = 0; standardCount = 0; processedCount = 0;
-  Object.values(results).forEach(r => {
-    if (r && r.status === 'done') {
-      processedCount++;
-      if (r.track === 'Personal Outreach') personalCount++;
-      else standardCount++;
-    }
-  });
-}
-
-async function rescreenOne(index) {
-  if (isProcessing) { await showAlert('Wait for current processing to finish.'); return; }
-  const name = [allContacts[index].firstName, allContacts[index].lastName].filter(Boolean).join(' ');
-  const ok1 = await showConfirm('Re-screen Contact', `Re-screen ${name}? This will overwrite their current result.`, 'Re-screen', 'Cancel');
-  if (!ok1) return;
-
-  const prev = results[index] || {};
-  const wasPersonal = prev.track === 'Personal Outreach';
-  if (wasPersonal && !overrides[index]) {
-    const ok2 = await showConfirm('Currently Personal Outreach', 'This contact is currently Personal Outreach. Re-screening may produce a different result. Continue?', 'Continue', 'Cancel');
-    if (!ok2) return;
-  }
-
-  results[index] = { status: 'processing' };
-  renderRow(index);
-  try {
-    const envelope = await screenContact(allContacts[index]);
-    if (envelope.ok) {
-      const result = envelope.result;
-      const cap = confidenceGateCap(allContacts[index]);
-      if (result.score > cap) { result.score = cap; result.track = 'Standard Sequence'; result.lowDataGated = true; }
-      results[index] = { status: 'done', ...result, parseSalvaged: envelope.meta.parse_salvaged, _debug: envelope.debug, _meta: envelope.meta };
-    } else {
-      results[index] = { status: 'done', track: 'Standard Sequence', score: 0, connections: [], recommendation: '', hook: '', industryCluster: '', screenFailed: true, failReason: envelope.error_message, _debug: envelope.debug };
-    }
-  } catch(e) {
-    results[index] = { status: 'done', track: 'Standard Sequence', score: 0, connections: [], recommendation: '', hook: '', industryCluster: '', screenFailed: true, failReason: e.message };
-  }
-  recomputeCounts();
-  renderRow(index);
-  updateStats();
-  await saveResults();
-}
-
-// ─── OVERRIDE MODAL ──────────────────────────────────────────
-function openOverrideModal(index) {
-  modalIndex = index;
-  const c = allContacts[index];
-  document.getElementById('modalTitle').textContent = `Force Personal: ${c.firstName} ${c.lastName}`;
-  document.getElementById('modalDesc').textContent = `${c.company} · ${c.location || ''} · Add a note explaining why this warrants personal outreach.`;
-  document.getElementById('modalNotes').value = notes[index] || '';
-  document.getElementById('overrideModal').classList.add('open');
-}
-function closeModal() {
-  document.getElementById('overrideModal').classList.remove('open');
-  modalIndex = null;
-}
-async function confirmOverride() {
-  if (modalIndex === null) return;
-  overrides[modalIndex] = true;
-  const noteVal = document.getElementById('modalNotes').value.trim();
-  if (noteVal) notes[modalIndex] = noteVal;
-  // Store override note on the result so it gets written to HubSpot
-  if (results[modalIndex]) {
-    results[modalIndex]._override_note = noteVal;
-  }
-  closeModal();
-  renderRow(modalIndex);
-  await saveOverrides();
-  await saveNotes();
-  // Auto-save override to HubSpot immediately
-  const c = allContacts[modalIndex];
-  const r = results[modalIndex];
-  if (c && c.hubspot_id && r) {
-    autoSaveToHubSpot(c.hubspot_id, {
-      track:         overrides[modalIndex] ? (overrides[modalIndex] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track,
-      score:         r.score,
-      hook:          hookEdits[modalIndex] !== undefined ? hookEdits[modalIndex] : (r.hook || ''),
-      recommendation: r.recommendation || '',
-      track_reason:  r.track_reason || '',
-      connections:   r.connections || [],
-      override:      true,
-      override_note: noteVal,
-      notes:         notes[modalIndex] || ''
-    });
-  }
-}
-function removeOverride(index) {
-  overrides[index] = false;
-  if (results[index]) delete results[index]._override_note;
-  renderRow(index);
-  saveOverrides();
-  // Auto-save removal to HubSpot
-  const c = allContacts[index];
-  const r = results[index];
-  if (c && c.hubspot_id && r && r.status === 'done') {
-    autoSaveToHubSpot(c.hubspot_id, {
-      track:         r.track,
-      score:         r.score,
-      hook:          hookEdits[index] !== undefined ? hookEdits[index] : (r.hook || ''),
-      recommendation: r.recommendation || '',
-      track_reason:  r.track_reason || '',
-      connections:   r.connections || [],
-      override:      false,
-      override_note: '',
-      notes:         notes[index] || ''
-    });
-  }
-}
-
-// ─── DEBOUNCED AUTO-SAVE TO HUBSPOT ─────────────────────────
-// Per-contact 3-second debounce — multiple edits to same contact
-// collapse into one HubSpot write. beforeunload flushes pending.
-
-const _pendingSaves = {};   // hubspot_id → { timer, payload }
-const _DEBOUNCE_MS  = 3000; // 3 seconds
-
-function autoSaveToHubSpot(hubspot_id, result) {
-  // Cancel any existing timer for this contact
-  if (_pendingSaves[hubspot_id]) {
-    clearTimeout(_pendingSaves[hubspot_id].timer);
-  }
-  // Store latest payload
-  _pendingSaves[hubspot_id] = {
-    payload: { hubspot_id, ...result },
-    timer: setTimeout(() => {
-      _flushContact(hubspot_id);
-    }, _DEBOUNCE_MS)
-  };
-  _showSaveIndicator();
-}
-
-async function _flushContact(hubspot_id) {
-  const pending = _pendingSaves[hubspot_id];
-  if (!pending) return;
-  delete _pendingSaves[hubspot_id];
-  try {
-    await fetch('/api/write-contact', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(pending.payload)
-    });
-  } catch(e) {
-    console.warn('Auto-save failed for', hubspot_id, e.message);
-  }
-  if (Object.keys(_pendingSaves).length === 0) _hideSaveIndicator();
-}
-
-async function _flushAllPending() {
-  const ids = Object.keys(_pendingSaves);
-  if (!ids.length) return;
-  // Cancel all timers and flush immediately
-  const flushes = ids.map(id => {
-    clearTimeout(_pendingSaves[id].timer);
-    return _flushContact(id);
-  });
-  await Promise.all(flushes);
-}
-
-// Save indicator — subtle "Saving..." text in batch action bar
-function _showSaveIndicator() {
-  let el = document.getElementById('hs-save-indicator');
-  if (!el) {
-    const bar = document.getElementById('batch-action-bar');
-    if (!bar) return;
-    el = document.createElement('span');
-    el.id = 'hs-save-indicator';
-    el.style.cssText = 'font-size:10px;color:var(--text-muted);letter-spacing:0.5px;opacity:0.7';
-    bar.appendChild(el);
-  }
-  el.textContent = '● Saving...';
-}
-function _hideSaveIndicator() {
-  const el = document.getElementById('hs-save-indicator');
-  if (!el) return;
-  el.textContent = '✓ Saved';
-  setTimeout(() => { if(el) el.textContent = ''; }, 2000);
-}
-
-// Flush all pending saves before tab closes
-window.addEventListener('beforeunload', (e) => {
-  const ids = Object.keys(_pendingSaves);
-  if (!ids.length) return;
-  // Cancel timers and fire synchronous beacons for each pending contact
-  ids.forEach(id => {
-    clearTimeout(_pendingSaves[id].timer);
-    const payload = JSON.stringify(_pendingSaves[id].payload);
-    // Use sendBeacon for reliable fire-and-forget on page close
-    navigator.sendBeacon('/api/write-contact', new Blob([payload], { type: 'application/json' }));
-    delete _pendingSaves[id];
-  });
-});
-
-// ─── INLINE HOOK EDIT ────────────────────────────────────────
-function startHookEdit(index) {
-  const cell = document.getElementById(`hook-cell-${index}`);
-  const current = hookEdits[index] || (results[index] && results[index].hook) || '';
-  cell.innerHTML = `<textarea class="hook-edit" id="hook-ta-${index}">${escapeHtml(current)}</textarea><button class="hook-save-btn" onclick="saveHook(${index})">Save</button>`;
-  document.getElementById(`hook-ta-${index}`).focus();
-}
-async function saveHook(index) {
-  const ta = document.getElementById(`hook-ta-${index}`);
-  if (!ta) return;
-  hookEdits[index] = ta.value.trim();
-  await saveHooks();
-  renderRow(index);
-  // Auto-save hook edit to HubSpot immediately
-  const c = allContacts[index];
-  const r = results[index];
-  if (c && c.hubspot_id && r && r.status === 'done') {
-    autoSaveToHubSpot(c.hubspot_id, {
-      track:        overrides[index] ? (overrides[index] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track,
-      score:        r.score,
-      hook:         hookEdits[index],
-      recommendation: r.recommendation || '',
-      track_reason: r.track_reason || '',
-      connections:  r.connections || [],
-      override:     !!overrides[index],
-      override_note: r._override_note || '',
-      notes:        notes[index] || ''
-    });
-  }
-}
-
-// ─── INLINE NOTES EDIT ───────────────────────────────────────
-function startNotesEdit(index) {
-  const cell = document.getElementById(`notes-cell-${index}`);
-  const current = notes[index] || '';
-  cell.innerHTML = `<textarea class="notes-edit" id="notes-ta-${index}">${escapeHtml(current)}</textarea><button class="notes-save-btn" onclick="saveNote(${index})">Save</button>`;
-  document.getElementById(`notes-ta-${index}`).focus();
-}
-async function saveNote(index) {
-  const ta = document.getElementById(`notes-ta-${index}`);
-  if (!ta) return;
-  notes[index] = ta.value.trim();
-  await saveNotes();
-  renderRow(index);
-  // Auto-save note to HubSpot with debounce
-  const c = allContacts[index];
-  const r = results[index];
-  if (c && c.hubspot_id && r && r.status === 'done') {
-    autoSaveToHubSpot(c.hubspot_id, {
-      track:         overrides[index] ? (overrides[index] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track,
-      score:         r.score,
-      hook:          hookEdits[index] !== undefined ? hookEdits[index] : (r.hook || ''),
-      recommendation: r.recommendation || '',
-      track_reason:  r.track_reason || '',
-      connections:   r.connections || [],
-      override:      !!overrides[index],
-      override_note: r._override_note || '',
-      notes:         notes[index]
-    });
-  }
-}
-
-// ─── BUILD ROW HTML ──────────────────────────────────────────
-function buildRowHTML(contact, result, index) {
-  const name = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || ' - ';
-  const safeName = escapeHtml(name);
-  const safeCompany = escapeHtml(contact.company || ' - ');
-  const safeLocation = escapeHtml(contact.location || ' - ');
-  const hasOverride = !!overrides[index];
-  const hasNotes = !!(notes[index] && notes[index].trim());
-  const currentHook = hookEdits[index] || (result && result.hook) || '';
-
-  // CONTACT CELL
-  const naics = contact.industry ? `<div class="contact-industry">${escapeHtml(contact.industry.replace(/^\d+ /, '').slice(0,40))}</div>` : '';
-  const contactHTML = `<div class="contact-name">${safeName}</div><div class="contact-company">${safeCompany}</div>${naics}<div class="contact-location">${safeLocation}</div>`;
-
-  // TRACK CELL
-  let trackHTML;
-  if (!result) {
-    trackHTML = '<span class="track-badge track-pending">Pending</span>';
-  } else if (result.status === 'processing') {
-    trackHTML = '<span class="track-badge track-processing"><span class="spinner"></span>Analyzing</span>';
-  } else {
-    const isPersonal = result.track === 'Personal Outreach' || hasOverride;
-    const badgeClass = hasOverride && result.track !== 'Personal Outreach' ? 'track-override' : isPersonal ? 'track-personal' : 'track-standard';
-    const badgeLabel = hasOverride && result.track !== 'Personal Outreach' ? 'Personal (Override)' : isPersonal ? 'Personal Outreach' : 'Standard Sequence';
-    trackHTML = `<span class="track-badge ${badgeClass}">${badgeLabel}</span>`;
-    trackHTML += '<div class="override-row">';
-    if (hasOverride) {
-      trackHTML += `<button class="override-btn active" onclick="removeOverride(${index})">✓ Override  -  Remove</button>`;
-    } else {
-      trackHTML += `<button class="override-btn" onclick="openOverrideModal(${index})">Force Personal</button>`;
-    }
-    trackHTML += `<button class="rescreen-btn" onclick="rescreenOne(${index})" title="Re-screen this contact">⟳ Re-screen</button>`;
-    trackHTML += '</div>';
-  }
-
-  // SCORE CELL
-  let scoreHTML = '<span style="color:var(--text-muted)"> - </span>';
-  if (result && result.status === 'done') {
-    const s = result.score || 0;
-    const cls = s >= 60 ? 'score-high' : s >= 35 ? 'score-mid' : 'score-low';
-    const conf = getConfidence(contact, result);
-    const failFlag = result.screenFailed
-      ? `<span class="layer-badge" style="background:rgba(232,92,76,0.2);color:var(--red);border:1px solid rgba(232,92,76,0.4)" title="${escapeAttr(result.failReason||'Screen failed')}">${result.failReason === 'no_final_answer' ? 'No Answer' : 'Failed'}</span>` : '';
-    const salvageFlag = (!result.screenFailed && result.parseSalvaged)
-      ? '<span class="layer-badge" style="background:rgba(232,160,76,0.15);color:var(--amber);border:1px solid rgba(232,160,76,0.3)" title="Response was malformed and required recovery  -  rescreen for a clean result">Recovered</span>' : '';
-    const gateFlag = result.lowDataGated
-      ? '<span class="layer-badge" style="background:rgba(232,92,76,0.15);color:var(--red);border:1px solid rgba(232,92,76,0.3)" title="Score capped  -  insufficient public data">Low Data</span>' : '';
-    const heuristicFlag = result.heuristic
-      ? '<span class="layer-badge" style="background:rgba(136,136,136,0.15);color:var(--text-muted);border:1px solid var(--border)" title="Scored without AI  -  no API key was set">Heuristic</span>' : '';
-    scoreHTML = `<span class="${cls}">${s}</span>${failFlag}${salvageFlag}${gateFlag}${heuristicFlag}${confidenceHTML(conf)}`;
-  }
-
-  // CONNECTIONS CELL
-  let connectionsHTML = '<span style="color:var(--text-muted);font-size:12px"> - </span>';
-  if (result && result.status === 'done') {
-    if (result.connections && result.connections.length) {
-      connectionsHTML = '<div class="connections-mini">' +
-        result.connections.slice(0,5).map(c => {
-          const hasUrl = c.sourceUrl && c.sourceUrl.startsWith('http');
-          const tag = hasUrl
-            ? `<a class="conn-tag ${escapeAttr(c.strength)} has-source" href="${escapeAttr(c.sourceUrl)}" target="_blank" rel="noopener" title="${escapeAttr(c.description)}  -  click to view source">${escapeHtml(c.type)}<span class="src-icon">↗</span></a>`
-            : `<span class="conn-tag ${escapeAttr(c.strength)}" title="${escapeAttr(c.description)}">${escapeHtml(c.type)}</span>`;
-          return tag;
-        }).join('') + '</div>';
-    } else {
-      connectionsHTML = '<span style="color:var(--text-muted);font-size:12px">None found</span>';
-    }
-  }
-
-  // HOOK CELL (editable) — shows email preview button if template is set
-  const isPersonalFinal = (result && result.track === 'Personal Outreach') || hasOverride;
-  const hasTemplate = !!(emailTemplate.subject || emailTemplate.body);
-  let hookCellContent;
-  if (!result || result.status !== 'done') {
-    hookCellContent = '<span style="color:var(--text-muted);font-size:12px"> - </span>';
-  } else if (hasTemplate && result.status === 'done') {
-    // Show email preview button + hook text
-    const hookPreview = currentHook ? `<div class="hook-text" onclick="startHookEdit(${index})" title="Click to edit" style="font-size:11px;color:var(--text-muted);margin-top:4px">${escapeHtml(currentHook.slice(0,80))}${currentHook.length>80?'...':''}</div>` : '';
-    hookCellContent = `<div class="hook-cell-inner">
-      <button onclick="toggleEmailPreview(${index})" style="font-size:10px;font-weight:600;letter-spacing:0.5px;padding:3px 10px;border-radius:4px;border:1px solid rgba(201,168,76,0.4);background:rgba(201,168,76,0.1);color:var(--gold);cursor:pointer" title="View full email draft">&#9993; View Email</button>
-      ${hookPreview}
-    </div>`;
-  } else if (isPersonalFinal && currentHook) {
-    hookCellContent = `<div class="hook-text" onclick="startHookEdit(${index})" title="Click to edit">${escapeHtml(currentHook)}</div>`;
-  } else if (isPersonalFinal) {
-    hookCellContent = `<span class="hook-text" style="color:var(--text-muted)" onclick="startHookEdit(${index})" title="Click to add hook">+ Add hook...</span>`;
-  } else {
-    hookCellContent = '<span style="color:var(--text-muted);font-size:12px">Standard sequence</span>';
-  }
-  const hookCell = `<div class="hook-cell" id="hook-cell-${index}">${hookCellContent}</div>`;
-
-  // NOTES CELL (editable)
-  const notesContent = hasNotes
-    ? `<div class="notes-text has-notes" onclick="startNotesEdit(${index})">${escapeHtml(notes[index])}</div>`
-    : `<div class="notes-text" onclick="startNotesEdit(${index})">+ Add note...</div>`;
-  const notesCell = `<div class="notes-cell" id="notes-cell-${index}">${notesContent}</div>`;
-
-  // DRAWER TOGGLE  -  only show if contact has been screened
-  const hasDebug = result && result.status === 'done';
-  const toggleCell = hasDebug
-    ? `<button class="drawer-toggle" id="drawer-toggle-${index}" onclick="toggleDrawer(${index})" title="Show diagnostics">▶</button>`
-    : '<span style="display:inline-block;width:18px"></span>';
-
-  return `
-    <td style="padding:8px 6px;vertical-align:middle;width:24px">${toggleCell}</td>
-    <td>${contactHTML}</td>
-    <td>${trackHTML}</td>
-    <td>${scoreHTML}</td>
-    <td>${connectionsHTML}</td>
-    <td>${hookCell}</td>
-    <td>${notesCell}</td>`;
-}
-
-// ─── RENDER ──────────────────────────────────────────────────
-function renderRow(index) {
-  const row = document.getElementById(`row-${index}`);
-  if (!row) return;
-  row.innerHTML = buildRowHTML(allContacts[index], results[index], index);
-  applyFilterToRow(row, index);
-  // Re-render drawer if it was open
-  const drawer = document.getElementById(`drawer-${index}`);
-  if (drawer && drawer.classList.contains('open')) {
-    drawer.querySelector('td').innerHTML = buildDrawerHTML(allContacts[index], results[index], index);
-  }
-}
-
-function toggleDrawer(index) {
-  let drawer = document.getElementById(`drawer-${index}`);
-  const toggle = document.getElementById(`drawer-toggle-${index}`);
-  if (!drawer) {
-    // Create drawer row right after the contact row
-    const row = document.getElementById(`row-${index}`);
-    drawer = document.createElement('tr');
-    drawer.id = `drawer-${index}`;
-    drawer.className = 'debug-drawer';
-    drawer.innerHTML = `<td colspan="7">${buildDrawerHTML(allContacts[index], results[index], index)}</td>`;
-    row.insertAdjacentElement('afterend', drawer);
-  }
-  const isOpen = drawer.classList.toggle('open');
-  if (toggle) {
-    toggle.textContent = isOpen ? '▼' : '▶';
-    toggle.classList.toggle('open', isOpen);
-  }
-}
-
-function buildDrawerHTML(contact, result, index) {
-  if (!result || result.status !== 'done') return '<div style="padding:12px;color:var(--text-muted);font-size:12px">Not yet screened.</div>';
-  const d = result._debug || {};
-  const m = result._meta || {};
-
-  // ── SEARCH DIAGNOSTICS ──
-  const search1 = d.search1 ? `<div class="drawer-row"><div class="drawer-label">Search 1</div><div class="drawer-value mono">${escapeHtml(d.search1)}</div></div>` : '';
-  const search2 = d.search2_skipped
-    ? `<div class="drawer-row"><div class="drawer-label">Search 2</div><div class="drawer-value dim">Skipped  -  no full name</div></div>`
-    : d.search2 ? `<div class="drawer-row"><div class="drawer-label">Search 2</div><div class="drawer-value mono">${escapeHtml(d.search2)}</div></div>` : '';
-
-  const searchResultsHTML = (d.search_results || []).length > 0
-    ? `<div class="drawer-row"><div class="drawer-label">Pages Found</div>${
-        d.search_results.slice(0, 6).map(r => `
-          <div class="drawer-search-result">
-            ${r.url ? `<a href="${escapeAttr(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>` : `<span style="font-size:11px;color:var(--text)">${escapeHtml(r.title)}</span>`}
-            ${r.snippet ? `<div class="snippet">${escapeHtml(r.snippet)}</div>` : ''}
-          </div>`).join('')
-      }</div>`
-    : `<div class="drawer-row"><div class="drawer-value dim">${m.used_tools ? 'Search results not captured' : 'No web search  -  heuristic mode'}</div></div>`;
-
-  // ── MODEL REASONING ──
-  const trackReason = result.track_reason
-    ? `<div class="drawer-row"><div class="drawer-label">Track Decision</div><div class="drawer-value">${escapeHtml(result.track_reason)}</div></div>`
-    : '';
-
-  const connectionsHTML = (result.connections || []).length > 0
-    ? result.connections.map(c => {
-        const basisClass = c.basis === 'confirmed' ? 'confirmed' : c.basis === 'inferred' ? 'inferred' : 'weak';
-        const basisLabel = c.basis || 'unknown';
-        return `<div class="drawer-row">
-          <span class="drawer-chip ${basisClass}">${basisLabel}</span>
-          <span class="drawer-chip">${escapeHtml(c.strength || '')}</span>
-          <span style="font-size:11px;color:var(--text);margin-left:4px">${escapeHtml(c.type)}</span>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:3px;line-height:1.4">${escapeHtml(c.description||'')}${c.sourceUrl ? ` <a href="${escapeAttr(c.sourceUrl)}" target="_blank" rel="noopener" style="color:var(--gold);font-size:10px">↗</a>` : ''}</div>
-        </div>`;
-      }).join('')
-    : `<div class="drawer-value dim">No connections found</div>`;
-
-  const recommendation = result.recommendation
-    ? `<div class="drawer-row"><div class="drawer-label">Recommendation</div><div class="drawer-value">${escapeHtml(result.recommendation)}</div></div>`
-    : '';
-
-  // ── TECHNICAL DIAGNOSTICS ──
-  const stopReasons = (d.stop_reasons || []).join(', ') || ' - ';
-  const duration = m.duration_ms ? `${(m.duration_ms/1000).toFixed(1)}s` : ' - ';
-  const retries = m.retries != null ? m.retries : ' - ';
-  const usedTools = m.used_tools ? 'Yes' : 'No';
-  const parseSalvaged = m.parse_salvaged ? '<span style="color:var(--amber)">Yes  -  rescreen recommended</span>' : 'No';
-  const heuristic = m.heuristic ? '<span style="color:var(--amber)">Yes  -  no API key</span>' : 'No';
-  const rawResponse = d.raw_response
-    ? `<div class="drawer-row"><div class="drawer-label">Raw Response (truncated)</div><div class="drawer-value mono" style="white-space:pre-wrap;max-height:80px;overflow:auto;font-size:9px">${escapeHtml(d.raw_response)}</div></div>`
-    : '';
-
-  // ── RESCREEN BUTTON ──
-  const rescreenBtn = `<div class="drawer-rescreen"><button class="rescreen-btn" onclick="toggleDrawer(${index}); rescreenOne(${index});" style="padding:5px 14px;font-size:11px">⟳ Rescreen this contact</button></div>`;
-
-  return `<div class="drawer-inner">
-    <div class="drawer-section">
-      <h4>Search Diagnostics</h4>
-      ${search1}${search2}${searchResultsHTML}
-    </div>
-    <div class="drawer-section">
-      <h4>Model Reasoning</h4>
-      ${trackReason}
-      <div class="drawer-row"><div class="drawer-label">Connections</div>${connectionsHTML}</div>
-      ${recommendation}
-    </div>
-    <div class="drawer-section">
-      <h4>Technical</h4>
-      <div class="drawer-row"><div class="drawer-label">Stop Reason</div><div class="drawer-value mono">${escapeHtml(stopReasons)}</div></div>
-      <div class="drawer-row"><div class="drawer-label">Tokens</div><div class="drawer-value">${d.tokens ? (d.tokens.input_tokens.toLocaleString() + ' in / ' + d.tokens.output_tokens.toLocaleString() + ' out = ' + (d.tokens.input_tokens + d.tokens.output_tokens).toLocaleString() + ' total') : ' - '}</div></div>
-      <div class="drawer-row"><div class="drawer-label">Est. Cost</div><div class="drawer-value" style="color:var(--green)">${d.tokens ? ('$' + ((d.tokens.input_tokens * 3 / 1000000) + (d.tokens.output_tokens * 15 / 1000000)).toFixed(4)) : ' - '}</div></div>
-      <div class="drawer-row"><div class="drawer-label">Duration</div><div class="drawer-value">${duration}</div></div>
-      <div class="drawer-row"><div class="drawer-label">Retries</div><div class="drawer-value">${retries}</div></div>
-      <div class="drawer-row"><div class="drawer-label">Web Search Used</div><div class="drawer-value">${usedTools}</div></div>
-      <div class="drawer-row"><div class="drawer-label">Parse Salvaged</div><div class="drawer-value">${parseSalvaged}</div></div>
-      <div class="drawer-row"><div class="drawer-label">Heuristic Mode</div><div class="drawer-value">${heuristic}</div></div>
-      ${rawResponse}
-      ${rescreenBtn}
-    </div>
-  </div>`;
-}
-
-function getSortedIndices() {
-  let indices = allContacts.map((_, i) => i);
-  if (currentSort === 'score') {
-    indices.sort((a, b) => {
-      const sa = (results[a] && results[a].score) || 0;
-      const sb = (results[b] && results[b].score) || 0;
-      return sb - sa;
-    });
-  } else if (currentSort === 'name') {
-    indices.sort((a, b) => {
-      const na = [allContacts[a].firstName, allContacts[a].lastName].filter(Boolean).join(' ').toLowerCase();
-      const nb = [allContacts[b].firstName, allContacts[b].lastName].filter(Boolean).join(' ').toLowerCase();
-      return na.localeCompare(nb);
-    });
-  } else if (currentSort === 'industry') {
-    indices.sort((a, b) => {
-      const ia = (results[a] && results[a].industryCluster) || allContacts[a].industry || 'zzz';
-      const ib = (results[b] && results[b].industryCluster) || allContacts[b].industry || 'zzz';
-      return ia.localeCompare(ib);
-    });
-  }
-  return indices;
-}
-
-function renderTable() {
-  // Remember which drawers are open before wiping
-  const openDrawers = new Set();
-  document.querySelectorAll('.debug-drawer.open').forEach(d => {
-    const id = d.id.replace('drawer-', '');
-    if (id) openDrawers.add(parseInt(id));
-  });
-
-  const tbody = document.getElementById('tableBody');
-  tbody.innerHTML = '';
-  const indices = getSortedIndices();
-  let lastCluster = null;
-
-  indices.forEach(i => {
-    // Industry cluster separator rows
-    if (currentSort === 'industry') {
-      const cluster = (results[i] && results[i].industryCluster) || (allContacts[i].industry || '').replace(/^\d+ /, '') || 'Other';
-      if (cluster !== lastCluster) {
-        const sep = document.createElement('tr');
-        sep.className = 'cluster-header';
-        sep.innerHTML = `<td colspan="7">⊞ ${cluster}</td>`;
-        tbody.appendChild(sep);
-        lastCluster = cluster;
-      }
-    }
-    const tr = document.createElement('tr');
-    tr.id = `row-${i}`;
-    tr.dataset.index = i;
-    tr.innerHTML = buildRowHTML(allContacts[i], results[i], i);
-    tbody.appendChild(tr);
-
-    // Restore open drawers
-    if (openDrawers.has(i) && results[i] && results[i].status === 'done') {
-      const drawer = document.createElement('tr');
-      drawer.id = `drawer-${i}`;
-      drawer.className = 'debug-drawer open';
-      drawer.innerHTML = `<td colspan="7">${buildDrawerHTML(allContacts[i], results[i], i)}</td>`;
-      tbody.appendChild(drawer);
-      const toggle = document.getElementById(`drawer-toggle-${i}`);
-      if (toggle) { toggle.textContent = '▼'; toggle.classList.add('open'); }
-    }
-  });
-
-  document.querySelectorAll('#tableBody tr[id^="row-"]').forEach(row => {
-    applyFilterToRow(row, parseInt(row.dataset.index));
-  });
-}
-
-function toggleSort(type) {
-  if (currentSort === type) {
-    currentSort = 'default';
-    document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
-  } else {
-    currentSort = type;
-    document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
-    if (type === 'score') document.getElementById('sortScoreBtn').classList.add('active');
-    if (type === 'industry') document.getElementById('sortIndustryBtn').classList.add('active');
-  }
-  renderTable();
-}
-
-function applySort() {
-  renderTable();
-}
-
-function applyFilterToRow(row, index) {
-  if (currentFilter === 'all') { row.style.display = ''; return; }
-  const result = results[index];
-  const hasOverride = !!overrides[index];
-  const hasNotes = !!(notes[index] && notes[index].trim());
-  if (currentFilter === 'pending') { row.style.display = (!result || result.status === 'pending') ? '' : 'none'; return; }
-  if (currentFilter === 'overrides') { row.style.display = (hasOverride || hasNotes) ? '' : 'none'; return; }
-  const effectiveTrack = hasOverride ? 'Personal Outreach' : (result && result.track);
-  row.style.display = (effectiveTrack === currentFilter) ? '' : 'none';
-}
-
-function setFilter(filter, btn) {
-  currentFilter = filter;
-  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  document.querySelectorAll('#tableBody tr[id^="row-"]').forEach(row => {
-    applyFilterToRow(row, parseInt(row.dataset.index));
-  });
-}
-
-// ─── EXPORT CSV ───────────────────────────────────────────────
-function exportCSV() {
-  const headers = ['First Name','Last Name','Company','Location','Industry','Email','Track','Score','Connection Types','Hook','Notes','Confidence','Layer','Override'];
-  const rows = [headers];
-  const indices = getSortedIndices();
-  indices.forEach(i => {
-    const c = allContacts[i];
-    const r = results[i];
-    const hasOverride = !!overrides[i];
-    const effectiveTrack = hasOverride ? 'Personal Outreach (Override)' : (r ? (r.track||'Pending') : 'Pending');
-    const currentHook = hookEdits[i] || (r && r.hook) || '';
-    const conf = r ? getConfidence(c, r) : 0;
-    const confLabel = conf === 1 ? 'Low' : conf === 2 ? 'Medium' : conf === 3 ? 'High' : '';
-    const layer = r ? 'L1' : '';
-    rows.push([
-      c.firstName, c.lastName, c.company, c.location, c.industry, c.email,
-      effectiveTrack, r ? (r.score||0) : '',
-      r && r.connections ? r.connections.map(cn=>cn.type).join('; ') : '',
-      currentHook, notes[i]||''  , confLabel, layer, hasOverride ? 'Yes' : ''
-    ]);
-  });
-  const csv = rows.map(r => r.map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob = new Blob([csv], {type:'text/csv'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url;
-  a.download = 'toluca_lake_screened_contacts.csv'; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-// ─── EXCEL EXPORT ─────────────────────────────────────────────
-function exportExcel() {
-  const screened = allContacts
-    .map((c, i) => ({ c, r: results[i], i }))
-    .filter(x => x.r && x.r.status === 'done');
-  if (screened.length === 0) {
-    showAlert('No screened contacts to export. Run the screener first.');
-    return;
-  }
-  if (typeof XLSX !== 'undefined') {
-    _buildExcel(screened);
-  } else {
-    const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-    s.onload = () => _buildExcel(screened);
-    s.onerror = () => showAlert('Could not load Excel library. Check your internet connection.');
-    document.head.appendChild(s);
-  }
-}
-
-function _buildExcel(screened) {
-  const wb = XLSX.utils.book_new();
-
-  // ── SHEET 1: RESULTS ──────────────────────────────────────
-  const headers = [
-    // Contact
-    'First Name', 'Last Name', 'Job Title', 'Company', 'Industry',
-    'Location', 'Email', 'LinkedIn', 'Revenue', 'Founded',
-    // Screening output
-    'Score', 'Track', 'Override',
-    // Model reasoning
-    'Track Decision Reason', 'Recommendation',
-    'Connection 1', 'Connection 2', 'Connection 3', 'Connection 4', 'Connection 5',
-    'Hook',
-    // Search diagnostics
-    'Search 1 Query', 'Search 2 Query',
-    'Page 1', 'Page 2', 'Page 3',
-    // Technical
-    'Stop Reason', 'Duration (s)', 'Retries', 'Web Search Used',
-    'Parse Salvaged', 'Screen Failed', 'Low Data Gated',
-    // Notes
-    'Notes', 'Industry Cluster',
-    'Email Subject', 'Email Body'
-  ];
-
-  const rows = screened.map(({ c, r, i }) => {
-    const d = r._debug || {};
-    const m = r._meta || {};
-    const effectiveTrack = overrides[i] ? 'Personal Outreach (Override)' : (r.track || '');
-
-    // Format each connection as "confirmed/strong: Military Service  -  found LinkedIn profile"
-    const conns = (r.connections || []).slice(0, 5).map(cn => {
-      const basis = cn.basis || '?';
-      const strength = cn.strength || '';
-      const type = cn.type || '';
-      const desc = cn.description || '';
-      const url = cn.sourceUrl ? ' (' + cn.sourceUrl + ')' : '';
-      return '[' + basis + '/' + strength + '] ' + type + ': ' + desc + url;
-    });
-    while (conns.length < 5) conns.push('');
-
-    // Pages found
-    const pages = (d.search_results || []).slice(0, 3).map(p => p.url || p.title || '');
-    while (pages.length < 3) pages.push('');
-
-    return [
-      c.firstName || '', c.lastName || '', c.jobTitle || '', c.company || '',
-      (c.industry || '').replace(/^\d+ /, ''),
-      c.location || '', c.email || '', c.linkedin || '', c.revenue || '', c.founded || '',
-      r.score || 0, effectiveTrack, overrides[i] ? 'Yes' : '',
-      r.track_reason || '', r.recommendation || '',
-      conns[0], conns[1], conns[2], conns[3], conns[4],
-      hookEdits[i] || r.hook || '',
-      d.search1 || '', d.search2_skipped ? 'SKIPPED - no full name' : (d.search2 || ''),
-      pages[0], pages[1], pages[2],
-      (d.stop_reasons || []).join(', ') || '',
-      m.duration_ms ? (m.duration_ms / 1000).toFixed(1) : '',
-      m.retries != null ? m.retries : '',
-      m.used_tools ? 'Yes' : 'No',
-      m.parse_salvaged ? 'Yes' : 'No',
-      r.screenFailed ? 'Yes' : 'No',
-      r.lowDataGated ? 'Yes' : 'No',
-      notes[i] || '', r.industryCluster || '',
-      ...((() => { const em = getFullEmail(c, r, i); return em ? [em.subject, em.body] : ['','']; })())
-    ];
-  });
-
-  const ws1 = XLSX.utils.aoa_to_sheet([headers].concat(rows));
-  ws1['!cols'] = [
-    {wch:12},{wch:12},{wch:18},{wch:28},{wch:22},
-    {wch:18},{wch:28},{wch:32},{wch:14},{wch:8},
-    {wch:7},{wch:24},{wch:10},
-    {wch:45},{wch:45},
-    {wch:55},{wch:55},{wch:55},{wch:55},{wch:55},
-    {wch:55},
-    {wch:40},{wch:60},
-    {wch:40},{wch:40},{wch:40},
-    {wch:12},{wch:10},{wch:8},{wch:14},
-    {wch:12},{wch:12},{wch:14},
-    {wch:30},{wch:18}
-  ];
-  // Freeze top row
-  ws1['!freeze'] = { xSplit: 0, ySplit: 1 };
-  XLSX.utils.book_append_sheet(wb, ws1, 'Results');
-
-  // ── SHEET 2: CONNECTIONS DETAIL ───────────────────────────
-  // One row per connection  -  makes it easy to pivot/filter by type, basis, strength
-  const connHeaders = [
-    'Company', 'Owner', 'Score', 'Track',
-    'Strength', 'Basis', 'Type', 'Description', 'Source URL'
-  ];
-  const connRows = [];
-  screened.forEach(({ c, r, i }) => {
-    const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || '--';
-    const track = overrides[i] ? 'Personal Outreach (Override)' : (r.track || '');
-    (r.connections || []).forEach(cn => {
-      connRows.push([
-        c.company || '', name, r.score || 0, track,
-        cn.strength || '', cn.basis || '', cn.type || '',
-        cn.description || '', cn.sourceUrl || ''
-      ]);
-    });
-  });
-  const ws2 = XLSX.utils.aoa_to_sheet([connHeaders].concat(connRows));
-  ws2['!cols'] = [{wch:28},{wch:22},{wch:7},{wch:24},{wch:10},{wch:10},{wch:24},{wch:60},{wch:50}];
-  XLSX.utils.book_append_sheet(wb, ws2, 'Connections Detail');
-
-  // ── SHEET 3: RUN SUMMARY ──────────────────────────────────
-  const allDone = Object.values(results).filter(r => r && r.status === 'done');
-  const summaryData = [
-    ['TLG Batch Screener - Run Summary'],
-    ['Exported', new Date().toLocaleString()],
-    [],
-    ['Total Contacts', allContacts.length],
-    ['Screened', allDone.length],
-    ['Personal Outreach', allDone.filter(r => (r.track === 'Personal Outreach' || overrides[Object.keys(results).find(k => results[k] === r)])).length],
-    ['Standard Sequence', allDone.filter(r => r.track === 'Standard Sequence' && !r.screenFailed).length],
-    ['Overrides', Object.keys(overrides).length],
-    [],
-    ['Quality'],
-    ['Clean results', allDone.filter(r => !r.screenFailed && !r.parseSalvaged && !r.lowDataGated).length],
-    ['Parse Recovered', allDone.filter(r => r.parseSalvaged).length],
-    ['Screen Failed', allDone.filter(r => r.screenFailed).length],
-    ['Low Data Gated', allDone.filter(r => r.lowDataGated).length],
-    [],
-    ['Threshold Used', criteriaThreshold],
-    ['Search 2 Query', getSearch2Terms()]
-  ];
-  const ws3 = XLSX.utils.aoa_to_sheet(summaryData);
-  ws3['!cols'] = [{wch:28},{wch:40}];
-  XLSX.utils.book_append_sheet(wb, ws3, 'Run Summary');
-
-  XLSX.writeFile(wb, 'tlg-screener-' + new Date().toISOString().slice(0, 10) + '.xlsx');
-}
-
-// ─── CSV IMPORT ──────────────────────────────────────────────
-let _pendingImportContacts = null;
-
-function triggerImport() {
-  if (isProcessing) { showAlert('Cannot import while screening is in progress.'); return; }
-  document.getElementById('csvFileInput').value = '';
-  document.getElementById('csvFileInput').click();
-}
-
-async function handleCSVImport(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const text = await file.text();
-  const contacts = parseCSV(text);
-  if (!contacts || contacts.length === 0) {
-    await showAlert('No contacts found in this CSV. Make sure it has a header row and at least one data row.');
-    return;
-  }
-  _pendingImportContacts = contacts;
-
-  // Build preview
-  const first = contacts[0];
-  const previewLines = [
-    `Rows detected: ${contacts.length}`,
-    `─────────────────────`,
-    `First contact:`,
-    `  Name: ${[first.firstName, first.lastName].filter(Boolean).join(' ') || '(none)'}`,
-    `  Company: ${first.company || '(none)'}`,
-    `  Title: ${first.jobTitle || '(none)'}`,
-    `  Email: ${first.email || '(none)'}`,
-    `  Location: ${first.location || '(none)'}`,
-    `  LinkedIn: ${first.linkedin || '(none)'}`,
-    `  Revenue: ${first.revenue || '(none)'}`,
-  ].join('\n');
-  document.getElementById('importPreview').textContent = previewLines;
-  document.getElementById('importModalDesc').textContent = `"${file.name}"  -  ${contacts.length} contact${contacts.length !== 1 ? 's' : ''} ready to import.`;
-
-  // Warn if key fields look empty
-  const missingCompany = contacts.filter(c => !c.company).length;
-  const missingName = contacts.filter(c => !c.firstName && !c.lastName).length;
-  const warnings = [];
-  if (missingCompany > 0) warnings.push(`${missingCompany} contacts have no company name`);
-  if (missingName > 0) warnings.push(`${missingName} contacts have no owner name (search 2 will be skipped for these)`);
-  const warn = document.getElementById('importColumnWarning');
-  if (warnings.length > 0) { warn.style.display = 'block'; warn.textContent = '⚠ ' + warnings.join(' · '); }
-  else { warn.style.display = 'none'; }
-
-  document.getElementById('importAppendBtn').style.display = allContacts.length > 0 ? '' : 'none';
-  document.getElementById('importModal').classList.add('open');
-}
-
-async function confirmImport(mode) {
-  if (!_pendingImportContacts) return;
-  closeImportModal();
-
-  if (mode === 'replace') {
-    // Clear all results/overrides/notes for old contacts
-    results = {}; overrides = {}; notes = {}; hookEdits = {};
-    personalCount = 0; standardCount = 0; processedCount = 0;
-    l1Times = []; batchStartTime = null;
-    const keys = ['screener_results','screener_overrides','screener_notes','screener_hooks'];
-    await Promise.allSettled(keys.map(k => window.storage.set(k, '{}')));
-    await Promise.allSettled(keys.map(k => window.storage.delete(k)));
-    allContacts = _pendingImportContacts;
-  } else {
-    // Append  -  new contacts start at end, existing results untouched
-    allContacts = [...allContacts, ..._pendingImportContacts];
-  }
-
-  _pendingImportContacts = null;
-
-  // Update UI
-  document.getElementById('statTotal').textContent = allContacts.length;
-  document.getElementById('headerDesc').textContent = `Test A v2 (1-at-a-time)  -  first 100 of ${allContacts.length} contacts`;
-  DOM['controlTitle'].textContent = `Ready to Screen ${allContacts.length} Contacts`;
-  DOM['controlDesc'].textContent = 'Click Run Screener to analyze all contacts';
-  DOM['btnRun'].textContent = 'Run Screener';
-  DOM['btnRun'].disabled = false;
-  updateStats();
-  renderTable();
-}
-
-function closeImportModal() {
-  document.getElementById('importModal').classList.remove('open');
-}
-
-// ─── CSV PARSER ───────────────────────────────────────────────
-// Handles quoted fields, commas inside quotes, various line endings.
-// Maps Grata column names → internal contact schema.
-function parseCSV(text) {
-  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  if (lines.length < 2) return [];
-
-  // Parse header row
-  const headers = parseCSVRow(lines[0]).map(h => h.trim().toLowerCase());
-
-  // Column name mapping  -  Grata export headers → internal field names
-  const COL_MAP = {
-    // Name variants
-    'first name': 'firstName', 'firstname': 'firstName', 'first_name': 'firstName', 'owner first name': 'firstName',
-    'last name': 'lastName', 'lastname': 'lastName', 'last_name': 'lastName', 'owner last name': 'lastName',
-    // Company
-    'company': 'company', 'company name': 'company', 'organization': 'company', 'account name': 'company',
-    // Title
-    'job title': 'jobTitle', 'title': 'jobTitle', 'jobtitle': 'jobTitle', 'role': 'jobTitle', 'position': 'jobTitle',
-    // Contact
-    'email': 'email', 'email address': 'email', 'work email': 'email',
-    'linkedin': 'linkedin', 'linkedin url': 'linkedin', 'linkedin profile': 'linkedin', 'linkedin profile url': 'linkedin',
-    // Company details
-    'industry': 'industry', 'naics': 'industry', 'industry code': 'industry',
-    'location': 'location', 'city': 'location', 'headquarters': 'location', 'hq location': 'location',
-    'description': 'description', 'company description': 'description', 'about': 'description',
-    'revenue': 'revenue', 'annual revenue': 'revenue', 'estimated revenue': 'revenue', 'revenues': 'revenue',
-    'founded': 'founded', 'year founded': 'founded', 'founded year': 'founded',
-    'ownership': 'ownership', 'ownership type': 'ownership',
-    'key people': 'keyPeople', 'keypeopledisplay': 'keyPeople', 'key executives': 'keyPeople',
-    'grata link': 'grataLink', 'gratalink': 'grataLink', 'profile url': 'grataLink',
-    'domain': 'domain', 'website': 'domain', 'web address': 'domain',
-  };
-
-  // Map headers to field names
-  const fieldMap = headers.map(h => COL_MAP[h] || null);
-
-  // Parse data rows
-  const contacts = [];
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    const cells = parseCSVRow(line);
-    const contact = {
-      firstName: '', lastName: '', jobTitle: '', company: '', industry: '',
-      location: '', email: '', description: '', linkedin: '', revenue: '',
-      founded: '', ownership: '', keyPeople: '', grataLink: '', domain: ''
-    };
-    cells.forEach((val, j) => {
-      const field = fieldMap[j];
-      if (field) contact[field] = val.trim();
-    });
-    // Skip entirely blank rows
-    if (!contact.company && !contact.firstName && !contact.lastName && !contact.email) continue;
-    contacts.push(contact);
-  }
-  return contacts;
-}
-
-function parseCSVRow(line) {
-  const cells = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i+1] === '"') { current += '"'; i++; } // escaped quote
-      else { inQuotes = !inQuotes; }
-    } else if (ch === ',' && !inQuotes) {
-      cells.push(current);
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  cells.push(current);
-  return cells;
-}
-
-// ─── PAGE NAV ─────────────────────────────────────────────────
-function showPage(name) {
-  ['screener','criteria','email','history'].forEach(p => {
-    const pg = document.getElementById('page-'+p);
-    const tb = document.getElementById('tab-'+p);
-    if (pg) pg.classList.toggle('active', p===name);
-    if (tb) tb.classList.toggle('active', p===name);
-  });
-  if (name==='criteria') renderCriteriaPage();
-  if (name==='email') loadEmailTemplate();
-  if (name==='history') renderBatchHistory();
-}
-
-// ─── CRITERIA STATE ───────────────────────────────────────────
-const DEFAULT_TRIGGERS = [
-  { id:1,  label:'Immigrant background (Eastern Europe / former Soviet states)', weight:3 },
-  { id:2,  label:'Military veteran (Army, infantry, combat arms, special ops)', weight:3 },
-  { id:3,  label:'Single parent family / bootstrapped upbringing', weight:2 },
-  { id:4,  label:'California native with deep roots, especially Sacramento, Antelope Valley, or San Fernando Valley', weight:1 },
-  { id:5,  label:'UCLA or UC Berkeley alumni', weight:2 },
-  { id:6,  label:'Government / public sector background before entrepreneurship', weight:2 },
-  { id:7,  label:'Started business from scratch with very limited resources', weight:2 },
-  { id:8,  label:'Business serves government or military clients', weight:2 },
-  { id:9,  label:'Owner approaching retirement, no family succession plan', weight:2 },
-  { id:10, label:'First-generation immigrant who built the business from nothing', weight:3 },
-  { id:11, label:'Sacramento area business owner', weight:1 },
-  { id:12, label:'Endurance athlete  -  marathon, cycling, triathlon', weight:1 },
-  { id:13, label:'Civic engagement, political involvement, community leadership', weight:2 },
-  { id:14, label:'Strong employee culture, loyal long-tenured workforce', weight:1 },
-  { id:15, label:'Business in disability / human / developmental services sectors', weight:2 },
-];
-
-let criteriaWeights = {};
-let triggerLabels = {}; // overrides for default trigger labels
-let searchSelected = new Set(); // trigger ids selected for Search 2 (max 4)
-const SEARCH_SELECT_MAX = 4;
-let feedbackItems = [];
-let criteriaThreshold = 40;
-let customTriggers = []; // [{id, label, weight}]
-
-// Load criteria from storage on startup
-
-(async () => {
-  try {
-    const [cw, cf, ct, cc, cp, rseq] = await Promise.all([
-      window.storage.get('criteria_weights').catch(()=>null),
-      window.storage.get('criteria_feedback').catch(()=>null),
-      window.storage.get('criteria_threshold').catch(()=>null),
-      window.storage.get('criteria_custom_triggers').catch(()=>null),
-      window.storage.get('criteria_profile').catch(()=>null),
-      window.storage.get('replyio_sequences').catch(()=>null)
-    ]);
-    if (cw && cw.value) criteriaWeights = JSON.parse(cw.value);
-    if (cf && cf.value) feedbackItems = JSON.parse(cf.value);
-    if (ct && ct.value) criteriaThreshold = parseInt(ct.value) || 40;
-    if (cc && cc.value) customTriggers = JSON.parse(cc.value);
-    if (cp && cp.value) profileCache = { ...PROFILE_DEFAULTS, ...JSON.parse(cp.value) };
-    if (rseq && rseq.value) {
-      const seqs = JSON.parse(rseq.value);
-      const pEl = document.getElementById('replyio-personal-seq');
-      const sEl = document.getElementById('replyio-standard-seq');
-      if (pEl) pEl.value = seqs.personal || '';
-      if (sEl) sEl.value = seqs.standard || '';
-    }
-    document.getElementById('thresholdInput').value = criteriaThreshold;
-  } catch(e) {}
-})();
-
-function getAllTriggers() {
-  // Apply any label edits to default triggers
-  const defaults = DEFAULT_TRIGGERS.map(t => ({
-    ...t,
-    label: triggerLabels[t.id] || t.label
-  }));
-  return [...defaults, ...customTriggers];
-}
-
-function updateDefaultTriggerLabel(id, newLabel) {
-  triggerLabels[id] = newLabel;
-  // Auto-save label edits
-  try { window.storage.set('trigger_labels', JSON.stringify(triggerLabels)); } catch(e) {}
-}
-
-function getTriggerWeight(id) {
-  return criteriaWeights[id] !== undefined ? criteriaWeights[id] : (getAllTriggers().find(t=>t.id===id)||{}).weight || 1;
-}
-
-function addCustomTrigger() {
-  const newId = 'c_' + Date.now();
-  customTriggers.push({ id: newId, label: '', weight: 2, isNew: true });
-  renderCriteriaPage();
-  // Focus the new input
-  setTimeout(() => {
-    const inp = document.getElementById('trigger-input-' + newId);
-    if (inp) inp.focus();
-  }, 50);
-}
-
-function deleteCustomTrigger(id) {
-  customTriggers = customTriggers.filter(t => t.id !== id);
-  delete criteriaWeights[id];
-  renderCriteriaPage();
-}
-
-function updateCustomTriggerLabel(id, label) {
-  const t = customTriggers.find(t => t.id === id);
-  if (t) t.label = label;
-}
-
-function renderCriteriaPage() {
-  // Render default triggers list
-  const list = document.getElementById('triggersList');
-  if (!list) return; // criteria page not in DOM yet
-  const wlabels = ['','Low','Medium','High'];
-
-  // Ensure searchSelected is initialized
-  try {
-    if (searchSelected.size === 0) {
-      const defaults = getDefaultSearchSelected();
-      defaults.forEach(id => searchSelected.add(id));
-    }
-  } catch(e) {}
-  const selectedCount = searchSelected.size;
-
-  const defaultRows = DEFAULT_TRIGGERS.map(t => {
-    const w = getTriggerWeight(t.id);
-    const sid = String(t.id);
-    const isChecked = searchSelected.has(sid);
-    const isDisabled = !isChecked && selectedCount >= SEARCH_SELECT_MAX;
-    const label = triggerLabels[t.id] || t.label;
-    return `<div class="criteria-item" id="trigger-row-${t.id}">
-      <input type="checkbox" class="search-select-cb" ${isChecked ? 'checked' : ''} ${isDisabled ? 'disabled' : ''}
-        title="${isDisabled ? 'Max 4 selected  -  uncheck another first' : 'Include in Search 2'}"
-        onclick="toggleSearchSelect(${t.id})" />
-      <input class="custom-trigger-input" id="trigger-label-${t.id}"
-        value="${label.replace(/"/g,'&quot;')}"
-        placeholder="Describe this connection trigger..."
-        oninput="updateDefaultTriggerLabel(${t.id}, this.value)"
-        style="flex:1"
-      />
-      <div class="weight-dots">
-        ${[1,2,3].map(n => `<div class="wd ${w>=n?'w'+w:''}" onclick="setWeight(${t.id},${n})" title="${wlabels[n]} weight"></div>`).join('')}
-        <span class="wlabel">${wlabels[w]}</span>
-      </div>
-    </div>`;
-  }).join('');
-
-  const customRows = customTriggers.map(t => {
-    const w = getTriggerWeight(t.id);
-    return `<div class="criteria-item custom-trigger-row" id="trigger-row-${t.id}">
-      <input class="custom-trigger-input" id="trigger-input-${t.id}"
-        value="${t.label.replace(/"/g,'&quot;')}"
-        placeholder="Describe this connection trigger..."
-        oninput="updateCustomTriggerLabel('${t.id}', this.value)"
-      />
-      <div class="weight-dots">
-        ${[1,2,3].map(n => `<div class="wd ${w>=n?'w'+w:''}" onclick="setWeight('${t.id}',${n})" title="${wlabels[n]} weight"></div>`).join('')}
-        <span class="wlabel">${wlabels[w]}</span>
-      </div>
-      <button class="trigger-delete-btn" onclick="deleteCustomTrigger('${t.id}')" title="Remove trigger">✕</button>
-    </div>`;
-  }).join('');
-
-  const addBtn = `<div style="padding:10px 0 2px">
-    <button class="add-trigger-btn" onclick="addCustomTrigger()">+ Add trigger</button>
-  </div>`;
-
-  // Update selected count display
-  const countEl = document.getElementById('searchSelectedCount');
-  if (countEl) countEl.textContent = selectedCount + '/' + SEARCH_SELECT_MAX + ' selected for Search 2';
-
-  list.innerHTML = defaultRows + customRows + addBtn;
-
-  // Populate profile fields from cache (persisted values or defaults)
-  const _bg = document.getElementById('profileBackground');
-  if (_bg && !_bg.value) {
-    _bg.value = profileCache.background;
-    document.getElementById('profileLocation').value = profileCache.location;
-    document.getElementById('profileMilitary').value = profileCache.military;
-    document.getElementById('profileEducation').value = profileCache.education;
-    document.getElementById('profileOther').value = profileCache.other;
-  }
-
-  // Threshold pct
-  updateThresholdPct();
-
-  // Feedback list
-  renderFeedbackList();
-}
-
-function setWeight(id, w) {
-  criteriaWeights[id] = w;
-  // also update weight on custom trigger object
-  const ct = customTriggers.find(t => t.id === id);
-  if (ct) ct.weight = w;
-  renderCriteriaPage();
-}
-
-function updateThresholdPct() {
-  const thresh = parseInt(document.getElementById('thresholdInput').value) || 40;
-  const screened = Object.values(results).filter(r => r && r.status==='done');
-  if (screened.length === 0) { document.getElementById('thresholdPct').textContent = ' - '; return; }
-  const qualifying = screened.filter(r => (r.score||0) > thresh).length;
-  const pct = Math.round((qualifying / screened.length) * 100);
-  document.getElementById('thresholdPct').textContent = `${pct}% (${qualifying} of ${screened.length})`;
-}
-
-function renderFeedbackList() {
-  const el = document.getElementById('feedbackList');
-  if (feedbackItems.length === 0) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">No feedback added yet.</div>'; return; }
-  el.innerHTML = feedbackItems.map((f,i) => 
-    `<div class="feedback-entry"><div class="feedback-entry-text">${f}</div><span class="feedback-del" onclick="deleteFeedback(${i})">✕</span></div>`
-  ).join('');
-}
-
-function addFeedback() {
-  const val = document.getElementById('feedbackInput').value.trim();
-  if (!val) return;
-  feedbackItems.push(val);
-  document.getElementById('feedbackInput').value = '';
-  renderFeedbackList();
-}
-
-function deleteFeedback(i) {
-  feedbackItems.splice(i, 1);
-  renderFeedbackList();
-}
-
-async function saveCriteria() {
-  criteriaThreshold = parseInt(document.getElementById('thresholdInput').value) || 40;
-  // Collect profile field values
-  const profileData = {
-    background: document.getElementById('profileBackground').value || '',
-    location: document.getElementById('profileLocation').value || '',
-    military: document.getElementById('profileMilitary').value || '',
-    education: document.getElementById('profileEducation').value || '',
-    other: document.getElementById('profileOther').value || ''
-  };
-  try {
-    await window.storage.set('criteria_weights', JSON.stringify(criteriaWeights));
-    await window.storage.set('trigger_labels', JSON.stringify(triggerLabels));
-    await window.storage.set('criteria_feedback', JSON.stringify(feedbackItems));
-    await window.storage.set('criteria_threshold', String(criteriaThreshold));
-    await window.storage.set('criteria_custom_triggers', JSON.stringify(customTriggers));
-    await window.storage.set('criteria_profile', JSON.stringify(profileData));
-    profileCache = { ...profileData }; // keep cache in sync
-    // Save Reply.io sequence IDs
-    const replyioSeqs = {
-      personal: (document.getElementById('replyio-personal-seq') || {}).value || '',
-      standard: (document.getElementById('replyio-standard-seq') || {}).value || ''
-    };
-    await window.storage.set('replyio_sequences', JSON.stringify(replyioSeqs));
-  } catch(e) {}
-  const saved = document.getElementById('criteriaSaved');
-  if (saved) { saved.style.display = 'inline'; setTimeout(() => saved.style.display='none', 3000); }
-  updateThresholdPct();
-}
-
-// Auto-save criteria 1s after any change to profile/threshold fields
-let _criteriaAutoSaveTimer = null;
-function autoSaveCriteria() {
-  clearTimeout(_criteriaAutoSaveTimer);
-  _criteriaAutoSaveTimer = setTimeout(() => saveCriteria(), 1000);
-}
-
-// ─── EMAIL PREVIEW IN ROW ─────────────────────────────────────
-function toggleEmailPreview(index) {
-  const existingId = `email-preview-row-${index}`;
-  const existing = document.getElementById(existingId);
-  if (existing) { existing.remove(); return; }
-
-  const contact = allContacts[index];
-  const result = results[index];
-  if (!contact || !result) return;
-
-  const email = getFullEmail(contact, result, index);
-  if (!email) { showAlert('Save an email template first (Email Template tab).'); return; }
-
-  const row = document.getElementById(`row-${index}`);
-  if (!row) return;
-
-  const previewRow = document.createElement('tr');
-  previewRow.id = existingId;
-  previewRow.innerHTML = `<td colspan="7" style="padding:0">
-    <div style="background:var(--dark-2);border-left:3px solid var(--gold);padding:20px 24px;margin:0">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-        <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold)">Email Draft — ${escapeHtml(contact.company || '')}</div>
-        <div style="display:flex;gap:8px">
-          <button onclick="copyEmail(${index})" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--dark-3);color:var(--text);cursor:pointer">&#128203; Copy</button>
-          <button onclick="toggleEmailPreview(${index})" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--dark-3);color:var(--text-muted);cursor:pointer">&#x2715; Close</button>
-        </div>
-      </div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Subject: <span style="color:var(--text)">${escapeHtml(email.subject)}</span></div>
-      <div style="border-top:1px solid var(--border);margin:10px 0"></div>
-      <div style="font-size:13px;color:var(--text);line-height:1.8;white-space:pre-wrap">${escapeHtml(email.body)}</div>
-    </div>
-  </td>`;
-  row.after(previewRow);
-}
-
-function copyEmail(index) {
-  const contact = allContacts[index];
-  const result = results[index];
-  if (!contact || !result) return;
-  const email = getFullEmail(contact, result, index);
-  if (!email) return;
-  const text = `Subject: ${email.subject}\n\n${email.body}`;
-  navigator.clipboard.writeText(text).then(() => {
-    showAlert('Email copied to clipboard.');
-  }).catch(() => {
-    showAlert('Could not copy — please select and copy manually.');
-  });
-}
-let emailTemplate = { subject: '', body: '' };
-
-function spinHash(str) {
-  // Simple deterministic hash of a string -> number 0-999
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-function applySpintax(text, seed) {
-  // Recursively resolve {a|b|c} using deterministic seed
-  let counter = 0;
-  function resolve(t) {
-    return t.replace(/\{([^{}]+)\}/g, (match, inner) => {
-      const resolved = resolve(inner);
-      const options = resolved.split('|');
-      const idx = (seed + counter++) % options.length;
-      return options[idx];
-    });
-  }
-  // Loop until no more spintax
-  let prev = '';
-  let result = text;
-  while (result !== prev) { prev = result; result = resolve(result); }
-  return result;
-}
-
-function mergeEmail(template, contact, hook, track) {
-  const seed = spinHash((contact.company || '') + (contact.firstName || ''));
-  let text = applySpintax(template, seed);
-  text = text
-    .replace(/\[FIRST_NAME\]/g, contact.firstName || contact.lastName || 'there')
-    .replace(/\[LAST_NAME\]/g, contact.lastName || '')
-    .replace(/\[COMPANY\]/g, contact.company || '')
-    .replace(/\[HOOK\]/g, hook || '')
-    .replace(/\[TRACK\]/g, track || '');
-  return text;
-}
-
-function loadEmailTemplate() {
-  const subj = document.getElementById('emailSubject');
-  const body = document.getElementById('emailBody');
-  if (subj) subj.value = emailTemplate.subject || '';
-  if (body) body.value = emailTemplate.body || '';
-}
-
-async function saveEmailTemplate() {
-  emailTemplate.subject = document.getElementById('emailSubject').value;
-  emailTemplate.body = document.getElementById('emailBody').value;
-  try {
-    await window.storage.set('email_template', JSON.stringify(emailTemplate));
-  } catch(e) {}
-  const s = document.getElementById('emailSaved');
-  if (s) { s.style.display = 'inline'; setTimeout(() => s.style.display = 'none', 2000); }
-}
-
-let _emailAutoSaveTimer = null;
-function autoSaveEmailTemplate() {
-  clearTimeout(_emailAutoSaveTimer);
-  _emailAutoSaveTimer = setTimeout(() => saveEmailTemplate(), 1000);
-}
-
-function previewSampleEmail() {
-  if (!emailTemplate.body && !document.getElementById('emailBody').value) {
-    showAlert('Enter an email template first.');
-    return;
-  }
-  // Use live textarea values for preview
-  const subj = document.getElementById('emailSubject').value;
-  const body = document.getElementById('emailBody').value;
-  const sampleContact = { firstName: 'Henry', lastName: 'Hernandez', company: 'Veteran Fire Protection' };
-  const sampleHook = 'I noticed that Veteran Fire Protection was founded by a U.S. Army veteran — as a Ranger-qualified Infantry Officer myself, that shared background stood out immediately.';
-  const mergedSubj = mergeEmail(subj, sampleContact, sampleHook, 'Personal Outreach');
-  const mergedBody = mergeEmail(body, sampleContact, sampleHook, 'Personal Outreach');
-  document.getElementById('previewSubject').textContent = mergedSubj;
-  document.getElementById('previewBody').textContent = mergedBody;
-  document.getElementById('emailPreviewBox').style.display = 'block';
-}
-
-function getFullEmail(contact, result, index) {
-  if (!emailTemplate.subject && !emailTemplate.body) return null;
-  const hook = hookEdits[index] || result.hook || '';
-  const track = overrides[index] ? 'Personal Outreach' : (result.track || '');
-  return {
-    subject: mergeEmail(emailTemplate.subject, contact, hook, track),
-    body: mergeEmail(emailTemplate.body, contact, hook, track)
-  };
-}
-
-// Load email template from storage on init
-(async () => {
-  try {
-    const et = await window.storage.get('email_template');
-    if (et && et.value) emailTemplate = JSON.parse(et.value);
-  } catch(e) {}
-})();
-</script>
-
-</div><!-- end page-screener -->
-
-  <div id="page-criteria" class="page">
-    <div class="threshold-row">
-      <label>Personal Outreach Threshold</label>
-      <input type="number" class="threshold-input" id="thresholdInput" oninput="autoSaveCriteria()" min="1" max="100" value="40" oninput="updateThresholdPct()">
-      <div class="threshold-desc">Contacts scoring above this qualify for Personal Outreach. Currently <strong><span id="thresholdPct" style="color:var(--gold)"> - </span></strong> of screened contacts qualify. Adjust so ~10% qualify based on your weekly email capacity.</div>
-    </div>
-
-    <div class="criteria-grid">
-      <div class="criteria-card">
-        <h3>Connection Triggers</h3>
-        <p style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Set weight for each signal. High = strong upgrade trigger. Low = minor bonus.</p>
-        <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px">☑ Check up to <strong style="color:var(--gold)">4 criteria</strong> to include in Search 2. Checked criteria are searched regardless of weight. <span id="searchSelectedCount" class="search-selected-count">0/4 selected</span></p>
-        <div id="triggersList"></div>
-      </div>
-      <div class="criteria-card">
-        <h3>Steven's Profile</h3>
-        <div class="profile-field"><label>Background</label><textarea id="profileBackground" oninput="autoSaveCriteria()"></textarea></div>
-        <div class="profile-field"><label>Location</label><input type="text" id="profileLocation" oninput="autoSaveCriteria()"></div>
-        <div class="profile-field"><label>Military Service</label><input type="text" id="profileMilitary" oninput="autoSaveCriteria()"></div>
-        <div class="profile-field"><label>Education</label><input type="text" id="profileEducation" oninput="autoSaveCriteria()"></div>
-        <div class="profile-field"><label>Other Key Details</label><textarea id="profileOther" oninput="autoSaveCriteria()"></textarea></div>
-      </div>
-
-      <!-- Reply.io Sequences -->
-      <div class="criteria-card" style="grid-column:1/-1">
-        <h3 style="margin-bottom:6px">Reply.io Sequences</h3>
-        <p style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Set your sequence IDs once here — used every time you push to Reply.io. Find these in Reply.io → Sequences → click a sequence → the ID is in the URL.</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div class="profile-field">
-            <label>Personal Outreach Sequence ID</label>
-            <input type="text" id="replyio-personal-seq" placeholder="e.g. 12345" style="font-family:monospace">
-          </div>
-          <div class="profile-field">
-            <label>Standard Sequence Sequence ID</label>
-            <input type="text" id="replyio-standard-seq" placeholder="e.g. 67890" style="font-family:monospace">
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="feedback-box">
-      <h3>Feedback &amp; Calibration Notes</h3>
-      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Add observations from screening runs  -  what signals the AI missed, false positives, patterns you noticed. Saved feedback gets injected into future screening prompts.</p>
-      <div id="feedbackList"></div>
-      <textarea class="feedback-textarea" id="feedbackInput" placeholder="e.g. Sacramento geography alone should not score above 15  -  need additional signal. Or: Veteran-owned businesses are being under-scored when service branch is not explicitly mentioned."></textarea>
-      <div style="display:flex;gap:10px;margin-top:12px;align-items:center;flex-wrap:wrap">
-        <button class="crit-save-btn" onclick="addFeedback()">+ Add Note</button>
-        <button class="crit-save-btn" onclick="saveCriteria()">&#10003; Save All</button>
-        <span id="criteriaSaved" style="font-size:12px;color:var(--green);display:none">✓ Saved  -  applies to next screening run</span>
-      </div>
-    </div>
-  </div><!-- end page-criteria -->
-
-  <div id="page-history" class="page">
-    <div style="max-width:860px;margin:32px auto;padding:0 24px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
-        <div>
-          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:2px;margin-bottom:6px">Batch History</div>
-          <div style="font-family:'Playfair Display',serif;font-size:22px;color:var(--gold)">All Screened Batches</div>
-        </div>
-        <button onclick="renderBatchHistory()" style="font-size:11px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-muted);cursor:pointer;font-family:'DM Sans',sans-serif;letter-spacing:0.5px">Refresh</button>
-      </div>
-      <div style="background:var(--dark-2);border-radius:12px;padding:20px 24px;border:1px solid var(--border)">
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:16px">Click "Open →" on any batch to reload it into the screener. Previously screened contacts will be pre-populated — only unscreened contacts need to be re-run.</div>
-        <div id="batch-history-list">
-          <div style="font-size:12px;color:var(--text-muted);padding:20px 0">Loading...</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div id="page-email" class="page">
-    <div style="max-width:860px;margin:32px auto;padding:0 24px">
-      <div style="margin-bottom:28px">
-        <h2 style="font-size:18px;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-bottom:6px">Email Template</h2>
-        <p style="font-size:12px;color:var(--text-muted);line-height:1.6">Write your outreach template below. Use <strong style="color:var(--text)">[FIRST_NAME]</strong>, <strong style="color:var(--text)">[COMPANY]</strong>, and <strong style="color:var(--text)">[HOOK]</strong> as placeholders. Use <strong style="color:var(--gold)">{option1|option2|option3}</strong> for spintax — same contact always gets the same variation.</p>
-      </div>
-
-      <div style="margin-bottom:20px">
-        <label style="display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Subject Line</label>
-        <input id="emailSubject" oninput="autoSaveEmailTemplate()" type="text" placeholder="{Quick question|A thought|Reaching out} about [COMPANY]" style="width:100%;background:var(--dark-3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:10px 14px;box-sizing:border-box;">
-      </div>
-
-      <div style="margin-bottom:20px">
-        <label style="display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Email Body</label>
-        <textarea id="emailBody" oninput="autoSaveEmailTemplate()" rows="16" placeholder="Hi [FIRST_NAME],&#10;&#10;[HOOK]&#10;&#10;I'm Steven Pavlov — I'm looking to acquire one exceptional company to operate long-term as a steward, not a financial engineer.&#10;&#10;Would you be open to a brief conversation?&#10;&#10;Best,&#10;Steven" style="width:100%;background:var(--dark-3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:12px 14px;box-sizing:border-box;resize:vertical;line-height:1.7"></textarea>
-      </div>
-
-      <div style="display:flex;gap:12px;align-items:center;margin-bottom:32px">
-        <button onclick="saveEmailTemplate()" style="background:var(--gold);color:#1a1a1a;border:none;border-radius:6px;padding:10px 22px;font-weight:700;font-size:13px;cursor:pointer;letter-spacing:0.5px">&#10003; Save Template</button>
-        <button onclick="previewSampleEmail()" style="background:var(--dark-3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:10px 22px;font-size:13px;cursor:pointer">&#128065; Preview with Sample</button>
-        <span id="emailSaved" style="font-size:12px;color:var(--green);display:none">&#10003; Saved</span>
-      </div>
-
-      <div id="emailPreviewBox" style="display:none;background:var(--dark-3);border:1px solid var(--border);border-radius:8px;padding:20px 24px">
-        <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px">Preview</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Subject: <span id="previewSubject" style="color:var(--text)"></span></div>
-        <div style="border-top:1px solid var(--border);margin:12px 0"></div>
-        <div id="previewBody" style="font-size:13px;color:var(--text);line-height:1.8;white-space:pre-wrap"></div>
-      </div>
-
-      <div style="margin-top:40px;padding-top:24px;border-top:1px solid var(--border)">
-        <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px">Spintax Reference</div>
-        <div style="font-size:12px;color:var(--text-muted);line-height:2">
-          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">{Hi|Hello|Good morning}</code> — picks one per contact, consistent<br>
-          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">[FIRST_NAME]</code> — owner first name<br>
-          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">[COMPANY]</code> — company name<br>
-          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">[HOOK]</code> — AI-generated personal connection sentence<br>
-          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">[TRACK]</code> — Personal Outreach or Standard Sequence
-        </div>
-      </div>
-    </div>
-  </div><!-- end page-email -->
-</body>
-</html>
+    threading.Thread(target=_run_job, args=(job_id, contacts, criteria), daemon=True).start()
+
+    return jsonify({'ok': True, 'job_id': job_id, 'total': to_do,
+                    'already_screened': already, 'total_contacts': len(contacts)})
+
+# ── GET /api/screen-status/<job_id> ──────────────────────────────────────────
+@app.route('/api/screen-status/<job_id>', methods=['GET'])
+def screen_status(job_id):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if not job: return jsonify({'error': 'Job not found'}), 404
+
+    elapsed = int(time.time() - job['started_at'])
+    pct     = round((job['processed'] / job['total']) * 100) if job['total'] > 0 else 0
+    eta     = None
+    if job['processed'] > 0 and not job['done'] and job['total'] > 0:
+        rate = elapsed / job['processed']
+        eta  = int(rate * (job['total'] - job['processed']))
+
+    return jsonify({
+        'job_id': job['job_id'], 'batch_id': job['batch_id'],
+        'status': job['status'], 'total': job['total'],
+        'total_contacts': job.get('total_contacts', job['total']),
+        'processed': job['processed'], 'skipped': job.get('skipped', 0),
+        'pct': pct, 'current_contact': job.get('current_contact'),
+        'errors': job.get('errors', []), 'error_count': len(job.get('errors', [])),
+        'done': job['done'], 'elapsed_s': elapsed, 'eta_s': eta
+    })
+
+# ── GET /api/screen-jobs ──────────────────────────────────────────────────────
+@app.route('/api/screen-jobs', methods=['GET'])
+def screen_jobs():
+    with JOBS_LOCK:
+        jobs = [{'job_id': j['job_id'], 'batch_id': j['batch_id'], 'status': j['status'],
+                 'total': j['total'], 'processed': j['processed'], 'done': j['done'],
+                 'started_at': j['started_at']} for j in JOBS.values()]
+    jobs.sort(key=lambda x: x['started_at'], reverse=True)
+    return jsonify({'jobs': jobs[:20]})
+
+# ── POST /api/write-results (bulk) ───────────────────────────────────────────
+@app.route('/api/write-results', methods=['POST'])
+def write_results():
+    data    = request.get_json(force=True)
+    results = data.get('results', [])
+    if not results:     return jsonify({'error': 'No results'}), 400
+    if not HUBSPOT_TOKEN: return jsonify({'error': 'HUBSPOT_TOKEN not configured'}), 500
+    updated, failed, errors = 0, 0, []
+    for r in results:
+        hid = r.get('hubspot_id')
+        if not hid: failed += 1; continue
+        ok, err = _write_to_hs(hid, r)
+        if ok: updated += 1
+        else:  failed  += 1; errors.append({'id': hid, 'error': err})
+    return jsonify({'ok': True, 'updated': updated, 'failed': failed, 'errors': errors})
+
+# ── POST /api/write-contact (single auto-save) ───────────────────────────────
+@app.route('/api/write-contact', methods=['POST'])
+def write_contact():
+    """Auto-save a single contact change immediately."""
+    data = request.get_json(force=True)
+    hid  = data.get('hubspot_id')
+    if not hid:           return jsonify({'error': 'hubspot_id required'}), 400
+    if not HUBSPOT_TOKEN: return jsonify({'error': 'HUBSPOT_TOKEN not configured'}), 500
+    ok, err = _write_to_hs(hid, data)
+    return jsonify({'ok': ok, 'error': err})
+
+# ── POST /api/push-replyio ────────────────────────────────────────────────────
+@app.route('/api/push-replyio', methods=['POST'])
+def push_replyio():
+    REPLYIO_KEY = os.environ.get('REPLYIO_KEY', '')
+    if not REPLYIO_KEY: return jsonify({'error': 'REPLYIO_KEY not configured'}), 500
+    data         = request.get_json(force=True)
+    contacts     = data.get('contacts', [])
+    personal_seq = data.get('personal_sequence_id')
+    standard_seq = data.get('standard_sequence_id')
+    if not contacts: return jsonify({'error': 'No contacts'}), 400
+
+    enrolled, failed, errors = 0, 0, []
+    for c in contacts:
+        track  = c.get('track', 'Standard Sequence')
+        seq_id = personal_seq if track == 'Personal Outreach' else standard_seq
+        if not seq_id:
+            failed += 1; errors.append({'email': c.get('email'), 'error': 'No sequence ID'}); continue
+        resp = requests.post('https://api.reply.io/v1/people',
+                             headers={'x-api-key': REPLYIO_KEY, 'Content-Type': 'application/json'},
+                             json={'email': c.get('email',''), 'firstName': c.get('firstName',''),
+                                   'lastName': c.get('lastName',''), 'sequenceId': seq_id,
+                                   'variables': {'hook': c.get('hook',''), 'track': track}},
+                             timeout=15)
+        if resp.ok: enrolled += 1
+        else: failed += 1; errors.append({'email': c.get('email'), 'status': resp.status_code})
+
+    return jsonify({'ok': True, 'enrolled': enrolled, 'failed': failed, 'errors': errors})
+
+# ── Health ────────────────────────────────────────────────────────────────────
+@app.route('/health')
+def health():
+    return jsonify({'ok': True, 'hubspot': bool(HUBSPOT_TOKEN), 'anthropic': bool(ANTHROPIC_KEY),
+                    'active_jobs': sum(1 for j in JOBS.values() if not j['done'])})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
