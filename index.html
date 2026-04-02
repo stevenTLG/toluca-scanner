@@ -670,11 +670,43 @@ const DOM = new Proxy(_rawDOM, {
   }
 });
 
+// Use localStorage for persistence across sessions (criteria, sequences, profile)
+// Fall back to in-memory if localStorage unavailable
 window.storage = window.storage || {
+  _ls: (function(){
+    try { localStorage.setItem('_test','1'); localStorage.removeItem('_test'); return true; }
+    catch(e){ return false; }
+  })(),
   _mem: {},
-  async get(key) { const v = this._mem[key]; return v !== undefined ? { value: v } : null; },
-  async set(key, value) { this._mem[key] = String(value); return { ok: true }; },
-  async delete(key) { delete this._mem[key]; return { ok: true }; }
+  async get(key) {
+    try {
+      if(this._ls){ const v = localStorage.getItem('tl_'+key); return v !== null ? {value:v} : null; }
+      const v = this._mem[key]; return v !== undefined ? {value:v} : null;
+    } catch(e){ const v = this._mem[key]; return v !== undefined ? {value:v} : null; }
+  },
+  async set(key, value) {
+    try {
+      if(this._ls) localStorage.setItem('tl_'+key, String(value));
+      this._mem[key] = String(value); return {ok:true};
+    } catch(e){ this._mem[key] = String(value); return {ok:true}; }
+  },
+  async delete(key) {
+    try { if(this._ls) localStorage.removeItem('tl_'+key); }
+    catch(e){}
+    delete this._mem[key]; return {ok:true};
+  },
+  async list(prefix) {
+    const keys = [];
+    if(this._ls){
+      for(let i=0;i<localStorage.length;i++){
+        const k = localStorage.key(i);
+        if(k && k.startsWith('tl_'+(prefix||''))) keys.push(k.slice(3));
+      }
+    } else {
+      Object.keys(this._mem).filter(k=>!prefix||k.startsWith(prefix)).forEach(k=>keys.push(k));
+    }
+    return {keys};
+  }
 };
 
 // ─── DEBUG ───────────────────────────────────────────────────
@@ -951,7 +983,7 @@ async function writeResultsToHubSpot() {
   const btn = document.getElementById('btn-write-hs');
   const doneContacts = allContacts
     .map((c, i) => ({ contact: c, result: results[i] }))
-    .filter(({ result }) => result && result.status === 'done' && c => c);
+    .filter(({ result }) => result && result.status === 'done');
 
   const payload = allContacts
     .map((c, i) => {
@@ -3102,9 +3134,15 @@ async function saveCriteria() {
     await window.storage.set('replyio_sequences', JSON.stringify(replyioSeqs));
   } catch(e) {}
   const saved = document.getElementById('criteriaSaved');
-  saved.style.display = 'inline';
-  setTimeout(() => saved.style.display='none', 3000);
+  if (saved) { saved.style.display = 'inline'; setTimeout(() => saved.style.display='none', 3000); }
   updateThresholdPct();
+}
+
+// Auto-save criteria 1s after any change to profile/threshold fields
+let _criteriaAutoSaveTimer = null;
+function autoSaveCriteria() {
+  clearTimeout(_criteriaAutoSaveTimer);
+  _criteriaAutoSaveTimer = setTimeout(() => saveCriteria(), 1000);
 }
 
 // ─── EMAIL PREVIEW IN ROW ─────────────────────────────────────
@@ -3208,8 +3246,13 @@ async function saveEmailTemplate() {
     await window.storage.set('email_template', JSON.stringify(emailTemplate));
   } catch(e) {}
   const s = document.getElementById('emailSaved');
-  s.style.display = 'inline';
-  setTimeout(() => s.style.display = 'none', 2000);
+  if (s) { s.style.display = 'inline'; setTimeout(() => s.style.display = 'none', 2000); }
+}
+
+let _emailAutoSaveTimer = null;
+function autoSaveEmailTemplate() {
+  clearTimeout(_emailAutoSaveTimer);
+  _emailAutoSaveTimer = setTimeout(() => saveEmailTemplate(), 1000);
 }
 
 function previewSampleEmail() {
@@ -3253,7 +3296,7 @@ function getFullEmail(contact, result, index) {
   <div id="page-criteria" class="page">
     <div class="threshold-row">
       <label>Personal Outreach Threshold</label>
-      <input type="number" class="threshold-input" id="thresholdInput" min="1" max="100" value="40" oninput="updateThresholdPct()">
+      <input type="number" class="threshold-input" id="thresholdInput" oninput="autoSaveCriteria()" min="1" max="100" value="40" oninput="updateThresholdPct()">
       <div class="threshold-desc">Contacts scoring above this qualify for Personal Outreach. Currently <strong><span id="thresholdPct" style="color:var(--gold)"> - </span></strong> of screened contacts qualify. Adjust so ~10% qualify based on your weekly email capacity.</div>
     </div>
 
@@ -3266,11 +3309,11 @@ function getFullEmail(contact, result, index) {
       </div>
       <div class="criteria-card">
         <h3>Steven's Profile</h3>
-        <div class="profile-field"><label>Background</label><textarea id="profileBackground"></textarea></div>
-        <div class="profile-field"><label>Location</label><input type="text" id="profileLocation"></div>
-        <div class="profile-field"><label>Military Service</label><input type="text" id="profileMilitary"></div>
-        <div class="profile-field"><label>Education</label><input type="text" id="profileEducation"></div>
-        <div class="profile-field"><label>Other Key Details</label><textarea id="profileOther"></textarea></div>
+        <div class="profile-field"><label>Background</label><textarea id="profileBackground" oninput="autoSaveCriteria()"></textarea></div>
+        <div class="profile-field"><label>Location</label><input type="text" id="profileLocation" oninput="autoSaveCriteria()"></div>
+        <div class="profile-field"><label>Military Service</label><input type="text" id="profileMilitary" oninput="autoSaveCriteria()"></div>
+        <div class="profile-field"><label>Education</label><input type="text" id="profileEducation" oninput="autoSaveCriteria()"></div>
+        <div class="profile-field"><label>Other Key Details</label><textarea id="profileOther" oninput="autoSaveCriteria()"></textarea></div>
       </div>
 
       <!-- Reply.io Sequences -->
@@ -3330,12 +3373,12 @@ function getFullEmail(contact, result, index) {
 
       <div style="margin-bottom:20px">
         <label style="display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Subject Line</label>
-        <input id="emailSubject" type="text" placeholder="{Quick question|A thought|Reaching out} about [COMPANY]" style="width:100%;background:var(--dark-3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:10px 14px;box-sizing:border-box;">
+        <input id="emailSubject" oninput="autoSaveEmailTemplate()" type="text" placeholder="{Quick question|A thought|Reaching out} about [COMPANY]" style="width:100%;background:var(--dark-3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:10px 14px;box-sizing:border-box;">
       </div>
 
       <div style="margin-bottom:20px">
         <label style="display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Email Body</label>
-        <textarea id="emailBody" rows="16" placeholder="Hi [FIRST_NAME],&#10;&#10;[HOOK]&#10;&#10;I'm Steven Pavlov — I'm looking to acquire one exceptional company to operate long-term as a steward, not a financial engineer.&#10;&#10;Would you be open to a brief conversation?&#10;&#10;Best,&#10;Steven" style="width:100%;background:var(--dark-3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:12px 14px;box-sizing:border-box;resize:vertical;line-height:1.7"></textarea>
+        <textarea id="emailBody" oninput="autoSaveEmailTemplate()" rows="16" placeholder="Hi [FIRST_NAME],&#10;&#10;[HOOK]&#10;&#10;I'm Steven Pavlov — I'm looking to acquire one exceptional company to operate long-term as a steward, not a financial engineer.&#10;&#10;Would you be open to a brief conversation?&#10;&#10;Best,&#10;Steven" style="width:100%;background:var(--dark-3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:12px 14px;box-sizing:border-box;resize:vertical;line-height:1.7"></textarea>
       </div>
 
       <div style="display:flex;gap:12px;align-items:center;margin-bottom:32px">
