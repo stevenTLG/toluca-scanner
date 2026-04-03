@@ -244,7 +244,7 @@
       <div class="rate-limit-banner" id="rateLimitBanner">⏸ Rate limit hit  -  auto-resuming in <span id="resumeCountdown">180</span>s...</div>
     </div>
     <button class="btn btn-secondary" id="btnStop" style="display:none" onclick="stopProcessing()">Pause</button>
-    <button class="btn btn-secondary" onclick="showApiKeyModal('Enter or update your Anthropic API key.')" style="font-size:11px;padding:10px 14px" title="Set API Key">🔑 API Key</button>
+    <button class="btn btn-secondary" onclick="showApiKeyModal('Enter or update your Anthropic API key.')" style="font-size:11px;padding:10px 14px" title="Set API Key" id="btn-api-key">🔑 API Key</button>
     <button class="btn btn-primary" id="btnRun" onclick="startServerScreening()">▶ Run Screener</button>
   </div>
 
@@ -545,6 +545,17 @@ async function onScreeningComplete(job) {
   activeJobId = null;
   try { await window.storage.delete('active_job_' + BATCH_ID); } catch(e) {}
 
+  // Persist per-contact technical metadata to localStorage
+  if (job.contact_meta && Object.keys(job.contact_meta).length > 0) {
+    try {
+      const key = 'tl_contact_meta_' + BATCH_ID;
+      const existing = localStorage.getItem(key);
+      const prev = existing ? JSON.parse(existing) : {};
+      const merged = { ...prev, ...job.contact_meta };
+      localStorage.setItem(key, JSON.stringify(merged));
+    } catch(e) {}
+  }
+
   // Reload batch from HubSpot to get all freshly-written results
   await new Promise(r => setTimeout(r, 1500));
   await loadBatchFromHubSpot(BATCH_ID);
@@ -841,6 +852,9 @@ function parseRevenueValue(revenue) {
 
 // In-memory key store  -  used when localStorage is blocked
 let _apiKeyCache = lsGet('tls_anthropic_key') || '';
+// Update API key button display after DOM is ready
+document.addEventListener('DOMContentLoaded', () => { if(typeof _updateApiKeyBtn==='function') _updateApiKeyBtn(); });
+setTimeout(() => { if(typeof _updateApiKeyBtn==='function') _updateApiKeyBtn(); }, 100);
 
 function getAnthropicApiKey() {
   return _apiKeyCache.trim();
@@ -855,6 +869,18 @@ async function ensureApiKey() {
 function setApiKey(key) {
   _apiKeyCache = key.trim();
   lsSet('tls_anthropic_key', _apiKeyCache);
+  _updateApiKeyBtn();
+}
+function _updateApiKeyBtn() {
+  const btn = document.getElementById('btn-api-key');
+  if (!btn) return;
+  if (_apiKeyCache) {
+    btn.innerHTML = '🔑 API Key <span style="color:var(--green);font-size:10px;margin-left:4px">✓</span>';
+    btn.title = 'API key set — click to update';
+  } else {
+    btn.innerHTML = '🔑 API Key';
+    btn.title = 'Set API Key';
+  }
 }
 
 function heuristicScreen(contact) {
@@ -924,7 +950,8 @@ let allContacts = BATCH_CONTACTS;
 
 // ── Batch loading from HubSpot ───────────────────────────────────────────────
 const urlParams = new URLSearchParams(window.location.search);
-const BATCH_ID = urlParams.get('batch') || '';
+const BATCH_ID   = urlParams.get('batch') || '';
+const AUTOSTART  = urlParams.get('autostart') === '1';
 
 async function loadBatchFromHubSpot(batchId) {
   document.getElementById('headerDesc').textContent = `Loading ${batchId}...`;
@@ -988,12 +1015,33 @@ async function loadBatchFromHubSpot(batchId) {
       }
     });
 
+    // Load persisted technical metadata for this batch
+    try {
+      const metaRaw = localStorage.getItem('tl_contact_meta_' + batchId);
+      if (metaRaw) window._contactMeta = JSON.parse(metaRaw);
+      else window._contactMeta = {};
+    } catch(e) { window._contactMeta = {}; }
+
     document.getElementById('statTotal').textContent = allContacts.length;
     const preMsg = prePopulated > 0 ? ` — ${prePopulated} previously screened` : '';
     document.getElementById('headerDesc').textContent = `${batchId} — ${allContacts.length} contacts${preMsg}`;
     renderTable();
     updateStats();
     showBatchControls(batchId);
+
+    // Auto-start screening if ?autostart=1 and contacts need screening
+    if (AUTOSTART && batchId === BATCH_ID) {
+      const unscreened = allContacts.filter((c, i) => !results[i] || results[i].status !== 'done').length;
+      if (unscreened > 0) {
+        setTimeout(() => {
+          const btn = document.getElementById('btnRun');
+          if (btn && !btn.disabled) {
+            console.log('[autostart] kicking off server screening for', unscreened, 'contacts');
+            startServerScreening();
+          }
+        }, 2000); // small delay to let UI settle
+      }
+    }
 
     // Track batch in history
     saveBatchToHistory(batchId, allContacts.length, prePopulated);
@@ -2180,6 +2228,12 @@ Respond with ONLY the 2-sentence hook. No explanation, no quotes, no preamble.`;
           notes: notes[index] || ''
         });
       }
+      // Auto-open email draft for review if template is set
+      if (emailTemplate.subject || emailTemplate.body) {
+        const existingPreview = document.getElementById(`email-preview-row-${index}`);
+        if (existingPreview) existingPreview.remove();
+        setTimeout(() => toggleEmailPreview(index), 300);
+      }
     }
   } catch(e) {
     console.error('Hook generation failed:', e);
@@ -2503,7 +2557,10 @@ function toggleDrawer(index) {
 function buildDrawerHTML(contact, result, index) {
   if (!result || result.status !== 'done') return '<div style="padding:12px;color:var(--text-muted);font-size:12px">Not yet screened.</div>';
   const d = result._debug || {};
-  const m = result._meta || {};
+  // Merge stored technical metadata from server-side screening
+  const stored = (window._contactMeta && contact && contact.hubspot_id)
+    ? (window._contactMeta[contact.hubspot_id] || {}) : {};
+  const m = Object.keys(stored).length > 0 ? stored : (result._meta || {});
 
   // ── SEARCH DIAGNOSTICS ──
   const search1 = d.search1 ? `<div class="drawer-row"><div class="drawer-label">Search 1</div><div class="drawer-value mono">${escapeHtml(d.search1)}</div></div>` : '';
@@ -2546,6 +2603,11 @@ function buildDrawerHTML(contact, result, index) {
   // ── TECHNICAL DIAGNOSTICS ──
   const stopReasons = (d.stop_reasons || []).join(', ') || ' - ';
   const duration = m._from_hubspot ? 'Pre-loaded' : m.duration_ms ? `${(m.duration_ms/1000).toFixed(1)}s` : ' - ';
+  const tokenDetail = (m.tokens_input || m.tokens_output)
+    ? `${(m.tokens_input||0).toLocaleString()} in / ${(m.tokens_output||0).toLocaleString()} out = ${((m.tokens_input||0)+(m.tokens_output||0)).toLocaleString()} total`
+    : (d.tokens ? `${d.tokens.input_tokens.toLocaleString()} in / ${d.tokens.output_tokens.toLocaleString()} out = ${(d.tokens.input_tokens+d.tokens.output_tokens).toLocaleString()} total` : ' - ');
+  const costDetail = m.cost != null ? '$' + m.cost.toFixed(4)
+    : d.tokens ? '$' + ((d.tokens.input_tokens * 3 / 1000000) + (d.tokens.output_tokens * 15 / 1000000)).toFixed(4) : ' - ';
   const retries = m.retries != null ? m.retries : ' - ';
   const usedTools = m.used_tools ? 'Yes' : 'No';
   const parseSalvaged = m.parse_salvaged ? '<span style="color:var(--amber)">Yes  -  rescreen recommended</span>' : 'No';
@@ -2571,8 +2633,8 @@ function buildDrawerHTML(contact, result, index) {
     <div class="drawer-section">
       <h4>Technical</h4>
       <div class="drawer-row"><div class="drawer-label">Stop Reason</div><div class="drawer-value mono">${escapeHtml(stopReasons)}</div></div>
-      <div class="drawer-row"><div class="drawer-label">Tokens</div><div class="drawer-value">${d.tokens ? (d.tokens.input_tokens.toLocaleString() + ' in / ' + d.tokens.output_tokens.toLocaleString() + ' out = ' + (d.tokens.input_tokens + d.tokens.output_tokens).toLocaleString() + ' total') : ' - '}</div></div>
-      <div class="drawer-row"><div class="drawer-label">Est. Cost</div><div class="drawer-value" style="color:var(--green)">${d.tokens ? ('$' + ((d.tokens.input_tokens * 3 / 1000000) + (d.tokens.output_tokens * 15 / 1000000)).toFixed(4)) : ' - '}</div></div>
+      <div class="drawer-row"><div class="drawer-label">Tokens</div><div class="drawer-value">${tokenDetail}</div></div>
+      <div class="drawer-row"><div class="drawer-label">Est. Cost</div><div class="drawer-value" style="color:var(--green)">${costDetail}</div></div>
       <div class="drawer-row"><div class="drawer-label">Duration</div><div class="drawer-value">${duration}</div></div>
       <div class="drawer-row"><div class="drawer-label">Retries</div><div class="drawer-value">${retries}</div></div>
       <div class="drawer-row"><div class="drawer-label">Web Search Used</div><div class="drawer-value">${usedTools}</div></div>
@@ -3317,6 +3379,12 @@ function toggleEmailPreview(index) {
   const result = results[index];
   if (!contact || !result) return;
 
+  if (!emailTemplate.subject && !emailTemplate.body) {
+    showAlert('Save an email template first (Email Template tab).');
+    return;
+  }
+
+  const hook = hookEdits[index] !== undefined ? hookEdits[index] : (result.hook || '');
   const email = getFullEmail(contact, result, index);
   if (!email) { showAlert('Save an email template first (Email Template tab).'); return; }
 
@@ -3327,19 +3395,105 @@ function toggleEmailPreview(index) {
   previewRow.id = existingId;
   previewRow.innerHTML = `<td colspan="7" style="padding:0">
     <div style="background:var(--dark-2);border-left:3px solid var(--gold);padding:20px 24px;margin:0">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-        <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold)">Email Draft — ${escapeHtml(contact.company || '')}</div>
-        <div style="display:flex;gap:8px">
-          <button onclick="copyEmail(${index})" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--dark-3);color:var(--text);cursor:pointer">&#128203; Copy</button>
-          <button onclick="toggleEmailPreview(${index})" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--dark-3);color:var(--text-muted);cursor:pointer">&#x2715; Close</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div>
+          <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:2px">Email Draft — ${escapeHtml(contact.firstName || '')} ${escapeHtml(contact.lastName || '')} · ${escapeHtml(contact.company || '')}</div>
+          <div style="font-size:11px;color:var(--text-muted)">Edit hook and body below. Changes save automatically to HubSpot.</div>
         </div>
+        <button onclick="toggleEmailPreview(${index})" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--dark-3);color:var(--text-muted);cursor:pointer;flex-shrink:0">✕ Close</button>
       </div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Subject: <span style="color:var(--text)">${escapeHtml(email.subject)}</span></div>
-      <div style="border-top:1px solid var(--border);margin:10px 0"></div>
-      <div style="font-size:13px;color:var(--text);line-height:1.8;white-space:pre-wrap">${escapeHtml(email.body)}</div>
+
+      <div style="margin-bottom:14px">
+        <label style="display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Hook — 2-sentence personal opener</label>
+        <textarea id="ep-hook-${index}" style="width:100%;background:var(--dark-3);color:var(--text);border:1px solid var(--gold);border-radius:6px;padding:10px 12px;font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.6;resize:vertical;min-height:60px;box-sizing:border-box">${escapeHtml(hook)}</textarea>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <label style="display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Subject Line</label>
+        <input id="ep-subj-${index}" value="${escapeAttr(email.subject)}" style="width:100%;background:var(--dark-3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-family:'DM Sans',sans-serif;font-size:13px;box-sizing:border-box">
+      </div>
+
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Email Body</label>
+        <textarea id="ep-body-${index}" style="width:100%;background:var(--dark-3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.8;resize:vertical;min-height:220px;box-sizing:border-box;white-space:pre-wrap">${escapeHtml(email.body)}</textarea>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center">
+        <button onclick="saveEmailDraft(${index})" style="background:var(--gold);color:var(--dark);border:none;border-radius:6px;padding:9px 20px;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:0.5px">✓ Save Draft</button>
+        <button onclick="regenHook(${index})" style="background:var(--dark-3);color:var(--text-muted);border:1px solid var(--border);border-radius:6px;padding:9px 16px;font-size:12px;cursor:pointer">↺ Regenerate Hook</button>
+        <button onclick="copyEmailDraft(${index})" style="background:var(--dark-3);color:var(--text-muted);border:1px solid var(--border);border-radius:6px;padding:9px 16px;font-size:12px;cursor:pointer">⎘ Copy</button>
+        <span id="ep-saved-${index}" style="font-size:11px;color:var(--green);display:none">✓ Saved</span>
+      </div>
     </div>
   </td>`;
   row.after(previewRow);
+}
+
+async function saveEmailDraft(index) {
+  const hookEl = document.getElementById(`ep-hook-${index}`);
+  const bodyEl = document.getElementById(`ep-body-${index}`);
+  if (!hookEl) return;
+
+  const newHook = hookEl.value.trim();
+  if (newHook !== (hookEdits[index] || (results[index] && results[index].hook) || '')) {
+    hookEdits[index] = newHook;
+    if (results[index]) results[index].hook = newHook;
+    await saveHooks();
+    renderRow(index); // update hook cell in table
+  }
+
+  // Auto-save to HubSpot
+  const c = allContacts[index];
+  const r = results[index];
+  if (c && c.hubspot_id && r) {
+    autoSaveToHubSpot(c.hubspot_id, {
+      track:         overrides[index] ? (overrides[index] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track,
+      score:         r.score,
+      hook:          newHook,
+      recommendation: r.recommendation || '',
+      track_reason:  r.track_reason || '',
+      connections:   r.connections || [],
+      override:      !!overrides[index],
+      override_note: r._override_note || '',
+      notes:         notes[index] || ''
+    });
+  }
+
+  const saved = document.getElementById(`ep-saved-${index}`);
+  if (saved) { saved.style.display = 'inline'; setTimeout(() => saved.style.display = 'none', 2000); }
+}
+
+async function regenHook(index) {
+  const hookEl = document.getElementById(`ep-hook-${index}`);
+  const bodyEl = document.getElementById(`ep-body-${index}`);
+  if (!hookEl) return;
+  hookEl.value = 'Regenerating...';
+  hookEl.disabled = true;
+  await generateHookForIndex(index);
+  // Refresh the textarea with new hook
+  const newHook = hookEdits[index] || (results[index] && results[index].hook) || '';
+  hookEl.value = newHook;
+  hookEl.disabled = false;
+  // Also refresh email body with new hook
+  if (bodyEl) {
+    const c = allContacts[index];
+    const r = results[index];
+    if (c && r) {
+      const email = getFullEmail(c, r, index);
+      if (email) bodyEl.value = email.body;
+    }
+  }
+}
+
+function copyEmailDraft(index) {
+  const subjEl = document.getElementById(`ep-subj-${index}`);
+  const bodyEl = document.getElementById(`ep-body-${index}`);
+  if (!subjEl || !bodyEl) return;
+  const text = `Subject: ${subjEl.value}\n\n${bodyEl.value}`;
+  navigator.clipboard.writeText(text).then(() => {
+    const saved = document.getElementById(`ep-saved-${index}`);
+    if (saved) { saved.textContent = '✓ Copied'; saved.style.display = 'inline'; setTimeout(() => { saved.style.display = 'none'; saved.textContent = '✓ Saved'; }, 2000); }
+  }).catch(() => showAlert('Could not copy — select and copy manually.'));
 }
 
 function copyEmail(index) {
