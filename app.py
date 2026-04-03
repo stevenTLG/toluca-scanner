@@ -301,17 +301,30 @@ def _run_job(job_id, contacts, criteria):
             JOBS[job_id]['current_index']   = i
 
         try:
+            t_start = time.time()
             result = _screen_one(contact, criteria)
+            duration_ms = int((time.time() - t_start) * 1000)
             ok, err = _write_to_hs(contact['hubspot_id'], result)
             if not ok:
                 errors.append({'contact': name, 'error': f'HubSpot: {err}'})
             tok = result.pop('_tokens', {})
+            tok_in  = tok.get('input', 0)
+            tok_out = tok.get('output', 0)
+            contact_cost = round((tok_in * 3 / 1_000_000) + (tok_out * 15 / 1_000_000), 5)
             processed += 1
             with JOBS_LOCK:
                 JOBS[job_id]['processed'] = processed
-                JOBS[job_id]['tokens_input']  += tok.get('input', 0)
-                JOBS[job_id]['tokens_output'] += tok.get('output', 0)
+                JOBS[job_id]['tokens_input']  += tok_in
+                JOBS[job_id]['tokens_output'] += tok_out
                 JOBS[job_id]['results'][contact['hubspot_id']] = result
+                JOBS[job_id]['contact_meta'][contact['hubspot_id']] = {
+                    'tokens_input':  tok_in,
+                    'tokens_output': tok_out,
+                    'cost':          contact_cost,
+                    'duration_ms':   duration_ms,
+                    'stop_reason':   'end_turn',
+                    'used_tools':    True
+                }
         except Exception as e:
             errors.append({'contact': name, 'error': str(e)})
             processed += 1
@@ -363,7 +376,8 @@ def screen_batch():
             'current_contact': None, 'current_index': 0,
             'errors': [], 'results': {}, 'done': False,
             'started_at': time.time(), 'finished_at': None,
-            'tokens_input': 0, 'tokens_output': 0
+            'tokens_input': 0, 'tokens_output': 0,
+            'contact_meta': {}
         }
 
     threading.Thread(target=_run_job, args=(job_id, contacts, criteria), daemon=True).start()
@@ -395,7 +409,8 @@ def screen_status(job_id):
         'done': job['done'], 'elapsed_s': elapsed, 'eta_s': eta,
         'tokens_input': job.get('tokens_input', 0),
         'tokens_output': job.get('tokens_output', 0),
-        'cost': round((job.get('tokens_input',0) * 3 / 1_000_000) + (job.get('tokens_output',0) * 15 / 1_000_000), 4)
+        'cost': round((job.get('tokens_input',0) * 3 / 1_000_000) + (job.get('tokens_output',0) * 15 / 1_000_000), 4),
+        'contact_meta': job.get('contact_meta', {}) if job.get('done') else {}
     })
 
 # ── GET /api/screen-jobs ──────────────────────────────────────────────────────
