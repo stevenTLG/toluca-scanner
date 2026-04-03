@@ -936,17 +936,38 @@ async function loadBatchFromHubSpot(batchId) {
     let prePopulated = 0;
     allContacts.forEach((c, i) => {
       if (c.existing_track && c.existing_score) {
+        // Parse connections from JSON if stored
+        let conns = [];
+        try {
+          if (c.existing_connections) conns = JSON.parse(c.existing_connections);
+        } catch(e) {}
         results[i] = {
-          status:      'done',
-          track:       c.existing_track,
-          score:       parseFloat(c.existing_score) || 0,
-          hook:        c.existing_hook || '',
-          recommendation: '',
-          connections: [],
+          status:          'done',
+          track:           c.existing_track,
+          score:           parseFloat(c.existing_score) || 0,
+          hook:            c.existing_hook || '',
+          recommendation:  c.existing_recommendation || '',
+          track_reason:    c.existing_track_reason || '',
+          connections:     conns,
           industryCluster: '',
-          _preloaded:  true
+          override:        c.existing_override === 'true',
+          override_note:   c.existing_override_note || '',
+          _preloaded:      true,
+          _meta: {
+            retries: 0,
+            duration_ms: null,
+            used_tools: true,
+            parse_salvaged: false,
+            heuristic: false,
+            _from_hubspot: true
+          },
+          _debug: {
+            _from_hubspot: true
+          }
         };
         if (c.existing_hook) hookEdits[i] = c.existing_hook;
+        if (c.existing_notes) notes[i] = c.existing_notes;
+        if (c.existing_override === 'true') overrides[i] = c.existing_track === 'Personal Outreach' ? 'personal' : 'standard';
         prePopulated++;
       }
     });
@@ -2362,7 +2383,7 @@ function buildDrawerHTML(contact, result, index) {
             ${r.snippet ? `<div class="snippet">${escapeHtml(r.snippet)}</div>` : ''}
           </div>`).join('')
       }</div>`
-    : `<div class="drawer-row"><div class="drawer-value dim">${m.used_tools ? 'Search results not captured' : 'No web search  -  heuristic mode'}</div></div>`;
+    : `<div class="drawer-row"><div class="drawer-value dim">${d._from_hubspot ? 'Loaded from HubSpot  -  rescreen to see live results' : m.used_tools ? 'Search results not captured' : 'No web search  -  heuristic mode'}</div></div>`;
 
   // ── MODEL REASONING ──
   const trackReason = result.track_reason
@@ -2388,7 +2409,7 @@ function buildDrawerHTML(contact, result, index) {
 
   // ── TECHNICAL DIAGNOSTICS ──
   const stopReasons = (d.stop_reasons || []).join(', ') || ' - ';
-  const duration = m.duration_ms ? `${(m.duration_ms/1000).toFixed(1)}s` : ' - ';
+  const duration = m._from_hubspot ? 'Pre-loaded' : m.duration_ms ? `${(m.duration_ms/1000).toFixed(1)}s` : ' - ';
   const retries = m.retries != null ? m.retries : ' - ';
   const usedTools = m.used_tools ? 'Yes' : 'No';
   const parseSalvaged = m.parse_salvaged ? '<span style="color:var(--amber)">Yes  -  rescreen recommended</span>' : 'No';
