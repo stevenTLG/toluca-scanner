@@ -272,9 +272,11 @@ def _screen_one(contact, criteria):
         data = resp.json()
         if data.get('error'):
             raise Exception(data['error'].get('message', 'API error'))
+        usage = data.get('usage', {})
         text = '\n'.join(b['text'] for b in data.get('content', []) if b.get('type') == 'text')
         result = _parse_result(text)
         if result:
+            result['_tokens'] = {'input': usage.get('input_tokens', 0), 'output': usage.get('output_tokens', 0)}
             return result
         raise Exception(f"JSON parse failed: {text[:300]}")
     raise Exception("All attempts failed")
@@ -303,9 +305,12 @@ def _run_job(job_id, contacts, criteria):
             ok, err = _write_to_hs(contact['hubspot_id'], result)
             if not ok:
                 errors.append({'contact': name, 'error': f'HubSpot: {err}'})
+            tok = result.pop('_tokens', {})
             processed += 1
             with JOBS_LOCK:
                 JOBS[job_id]['processed'] = processed
+                JOBS[job_id]['tokens_input']  += tok.get('input', 0)
+                JOBS[job_id]['tokens_output'] += tok.get('output', 0)
                 JOBS[job_id]['results'][contact['hubspot_id']] = result
         except Exception as e:
             errors.append({'contact': name, 'error': str(e)})
@@ -357,7 +362,8 @@ def screen_batch():
             'processed': 0, 'skipped': already,
             'current_contact': None, 'current_index': 0,
             'errors': [], 'results': {}, 'done': False,
-            'started_at': time.time(), 'finished_at': None
+            'started_at': time.time(), 'finished_at': None,
+            'tokens_input': 0, 'tokens_output': 0
         }
 
     threading.Thread(target=_run_job, args=(job_id, contacts, criteria), daemon=True).start()
@@ -386,7 +392,10 @@ def screen_status(job_id):
         'processed': job['processed'], 'skipped': job.get('skipped', 0),
         'pct': pct, 'current_contact': job.get('current_contact'),
         'errors': job.get('errors', []), 'error_count': len(job.get('errors', [])),
-        'done': job['done'], 'elapsed_s': elapsed, 'eta_s': eta
+        'done': job['done'], 'elapsed_s': elapsed, 'eta_s': eta,
+        'tokens_input': job.get('tokens_input', 0),
+        'tokens_output': job.get('tokens_output', 0),
+        'cost': round((job.get('tokens_input',0) * 3 / 1_000_000) + (job.get('tokens_output',0) * 15 / 1_000_000), 4)
     })
 
 # ── GET /api/screen-jobs ──────────────────────────────────────────────────────
@@ -453,6 +462,55 @@ def push_replyio():
         else: failed += 1; errors.append({'email': c.get('email'), 'status': resp.status_code})
 
     return jsonify({'ok': True, 'enrolled': enrolled, 'failed': failed, 'errors': errors})
+
+
+# ── POST /api/rollback ───────────────────────────────────────────────────────
+@app.route('/api/rollback', methods=['POST'])
+def rollback():
+    """Clear all scanner_* properties from every contact in a batch."""
+    if not HUBSPOT_TOKEN:
+        return jsonify({'error': 'HUBSPOT_TOKEN not configured'}), 500
+    data = request.get_json(force=True)
+    batch_id = data.get('batch_id', '').strip()
+    if not batch_id:
+        return jsonify({'error': 'batch_id required'}), 400
+    # Fetch all contact IDs for this batch
+    contact_ids = []
+    after = None
+    while True:
+        payload = {
+            'filterGroups': [{'filters': [{'propertyName': 'grata_batch', 'operator': 'EQ', 'value': batch_id}]}],
+            'properties': ['firstname'],
+            'limit': 100
+        }
+        if after:
+            payload['after'] = after
+        resp = requests.post(f'{HUBSPOT_BASE}/crm/v3/objects/contacts/search',
+                             headers=hs_headers(), json=payload, timeout=30)
+        if not resp.ok:
+            return jsonify({'error': f'HubSpot fetch failed: {resp.status_code}'}), 500
+        d = resp.json()
+        contact_ids.extend([c['id'] for c in d.get('results', [])])
+        nxt = d.get('paging', {}).get('next', {}).get('after')
+        if nxt:
+            after = nxt
+        else:
+            break
+    # Clear scanner properties on each contact
+    clear_props = {p: '' for p in [
+        'scanner_track', 'scanner_score', 'scanner_hook', 'scanner_recommendation',
+        'scanner_track_reason', 'scanner_connections', 'scanner_connection_summary',
+        'scanner_override', 'scanner_override_note', 'scanner_notes'
+    ]}
+    cleared, failed = 0, []
+    for cid in contact_ids:
+        r = requests.patch(f'{HUBSPOT_BASE}/crm/v3/objects/contacts/{cid}',
+                           headers=hs_headers(), json={'properties': clear_props}, timeout=15)
+        if r.ok:
+            cleared += 1
+        else:
+            failed.append(cid)
+    return jsonify({'ok': True, 'cleared': cleared, 'failed': len(failed), 'total': len(contact_ids)})
 
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.route('/health')
