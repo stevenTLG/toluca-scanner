@@ -134,6 +134,7 @@ def _fetch_contacts(batch_id, full=False):
                 entry.update({
                     'existing_recommendation': p.get('scanner_recommendation', ''),
                     'existing_track_reason':   p.get('scanner_track_reason', ''),
+                    'existing_connections':    p.get('scanner_connections', ''),
                     'existing_override':       p.get('scanner_override', ''),
                     'existing_override_note':  p.get('scanner_override_note', ''),
                     'existing_notes':          p.get('scanner_notes', ''),
