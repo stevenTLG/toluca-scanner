@@ -487,6 +487,22 @@ async function pollJobStatus() {
     if (!resp.ok) return;
     const job = await resp.json();
     updateProgressUI(job);
+    // Update token display from server-side job
+    if (job.tokens_input || job.tokens_output) {
+      // Set absolute totals (not additive) so we don't double-count across polls
+      tokenTotals.input  = job.tokens_input  || 0;
+      tokenTotals.output = job.tokens_output || 0;
+      tokenTotals.count  = job.processed     || 0;
+      const total = tokenTotals.input + tokenTotals.output;
+      const cost  = job.cost || 0;
+      const pct   = Math.min(100, (total / 440_000) * 100);
+      const tokEl = document.getElementById('statTokens');
+      const barEl = document.getElementById('statTokenBar');
+      const costEl = document.getElementById('statTokenCost');
+      if (tokEl)  tokEl.textContent  = total >= 1000 ? (total/1000).toFixed(1)+'k' : total;
+      if (barEl)  barEl.style.width  = pct + '%';
+      if (costEl) costEl.textContent = '$' + cost.toFixed(2);
+    }
 
     if (job.done) {
       stopPolling();
@@ -1003,11 +1019,52 @@ function showBatchControls(batchId) {
     <button class="btn btn-secondary" onclick="writeResultsToHubSpot()" style="font-size:12px;padding:8px 16px" id="btn-write-hs">
       ↑ Write to HubSpot
     </button>
+    <button class="btn btn-secondary" onclick="rollbackHubSpot()" style="font-size:12px;padding:8px 16px;color:var(--red);border-color:rgba(232,92,76,0.4)" id="btn-rollback">
+      ✕ Rollback HubSpot
+    </button>
     <button class="btn btn-primary" onclick="pushToReplyIo()" style="font-size:12px;padding:8px 16px" id="btn-push-reply">
       → Push to Reply.io
     </button>
   `;
   toolbar.parentNode.insertBefore(bar, toolbar);
+}
+
+async function rollbackHubSpot() {
+  if (!BATCH_ID) { await showAlert('No batch loaded.'); return; }
+  const ok = await showConfirm(
+    'Rollback HubSpot Data',
+    `This will clear ALL screener data (scores, tracks, hooks, connections, recommendations, notes) from every contact in batch ${BATCH_ID}. This cannot be undone. Continue?`,
+    'Rollback', 'Cancel'
+  );
+  if (!ok) return;
+  const btn = document.getElementById('btn-rollback');
+  btn.textContent = 'Rolling back...'; btn.disabled = true;
+  try {
+    const resp = await fetch('/api/rollback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ batch_id: BATCH_ID })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      // Clear local state too
+      results = {}; overrides = {}; notes = {}; hookEdits = {}; pushed = {};
+      renderTable(); updateStats();
+      btn.textContent = `✓ Cleared ${data.cleared} contacts`;
+      btn.style.color = 'var(--green)';
+      setTimeout(() => {
+        btn.textContent = '✕ Rollback HubSpot';
+        btn.style.color = 'var(--red)';
+        btn.disabled = false;
+      }, 3000);
+    } else {
+      await showAlert('Rollback failed: ' + (data.error || 'Unknown error'));
+      btn.textContent = '✕ Rollback HubSpot'; btn.disabled = false;
+    }
+  } catch(e) {
+    await showAlert('Rollback error: ' + e.message);
+    btn.textContent = '✕ Rollback HubSpot'; btn.disabled = false;
+  }
 }
 
 async function writeResultsToHubSpot() {
@@ -1127,6 +1184,16 @@ async function pushToReplyIo() {
       btn.style.background = 'rgba(76,175,125,0.15)';
       btn.style.color = 'var(--green)';
       btn.style.borderColor = 'rgba(76,175,125,0.3)';
+      // Mark each pushed contact's row with Pushed badge
+      allContacts.forEach((c, i) => {
+        const r = results[i];
+        if (!r || r.status !== 'done' || !c.email) return;
+        const track = overrides[i] ? (overrides[i] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track;
+        if (track === 'Personal Outreach' || track === 'Standard Sequence') {
+          pushed[i] = true;
+          renderRow(i);
+        }
+      });
       // Mark batch as pushed in storage
       if (BATCH_ID) {
         try {
@@ -1159,6 +1226,7 @@ let results = {};
 let overrides = {};   // index -> true/false
 let notes = {};       // index -> string
 let hookEdits = {};   // index -> string (edited hook)
+let pushed = {};      // index -> true (contact was pushed to Reply.io)
 let isProcessing = false;
 let shouldStop = false;
 let currentFilter = 'all';
@@ -2050,6 +2118,73 @@ async function confirmOverride() {
       notes:         notes[modalIndex] || ''
     });
   }
+  // Generate hook if none exists for this forced-personal contact
+  const savedIdx = modalIndex;
+  const currentHook = hookEdits[savedIdx] !== undefined ? hookEdits[savedIdx] : (r && r.hook) || '';
+  if (!currentHook.trim()) {
+    generateHookForIndex(savedIdx);
+  }
+}
+
+async function generateHookForIndex(index) {
+  const c = allContacts[index];
+  const r = results[index];
+  if (!c || !r) return;
+  // Show generating indicator in hook cell
+  const hookCell = document.querySelector(`#row-${index} .hook-cell`);
+  if (hookCell) hookCell.innerHTML = '<span style="color:var(--text-muted);font-size:11px;font-style:italic">Generating hook...</span>';
+  try {
+    // Build a focused hook-only prompt
+    const profile = getProfileText();
+    const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || 'the owner';
+    const connections = (r.connections || []).map(cn => `- ${cn.type}: ${cn.description}`).join('\n') || 'No specific connections found';
+    const prompt = `Write a 2-sentence personal email opener for Steven Pavlov reaching out to ${name} at ${c.company || 'their company'}.
+
+Steven's profile: ${profile}
+
+Known connections/context:
+${connections}
+
+Company: ${c.company || ''} | Industry: ${c.industry || ''} | Location: ${c.location || ''}
+
+Rules: Must feel personal and specific. Reference a real connection point if one exists. First sentence establishes the connection. Second sentence pivots to interest in the business. No generic openers. No mention of acquisition directly. Keep it warm and human.
+
+Respond with ONLY the 2-sentence hook. No explanation, no quotes, no preamble.`;
+
+    const resp = await fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': window._apiKey || '' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 200,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const data = await resp.json();
+    const hook = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+    if (hook) {
+      hookEdits[index] = hook;
+      if (results[index]) results[index].hook = hook;
+      renderRow(index);
+      // Auto-save the new hook to HubSpot
+      if (c.hubspot_id && results[index]) {
+        autoSaveToHubSpot(c.hubspot_id, {
+          track: 'Personal Outreach',
+          score: r.score,
+          hook,
+          recommendation: r.recommendation || '',
+          track_reason: r.track_reason || '',
+          connections: r.connections || [],
+          override: true,
+          override_note: results[index]._override_note || '',
+          notes: notes[index] || ''
+        });
+      }
+    }
+  } catch(e) {
+    console.error('Hook generation failed:', e);
+    renderRow(index); // restore row
+  }
 }
 function removeOverride(index) {
   overrides[index] = false;
@@ -2243,7 +2378,8 @@ function buildRowHTML(contact, result, index) {
     const isPersonal = result.track === 'Personal Outreach' || hasOverride;
     const badgeClass = hasOverride && result.track !== 'Personal Outreach' ? 'track-override' : isPersonal ? 'track-personal' : 'track-standard';
     const badgeLabel = hasOverride && result.track !== 'Personal Outreach' ? 'Personal (Override)' : isPersonal ? 'Personal Outreach' : 'Standard Sequence';
-    trackHTML = `<span class="track-badge ${badgeClass}">${badgeLabel}</span>`;
+    const isPushed = !!pushed[index];
+    trackHTML = `<span class="track-badge ${badgeClass}">${badgeLabel}</span>${isPushed ? '<span class="layer-badge" style="background:rgba(76,175,125,0.15);color:var(--green);border:1px solid rgba(76,175,125,0.3);margin-left:4px">✓ Pushed</span>' : ''}`;
     trackHTML += '<div class="override-row">';
     if (hasOverride) {
       trackHTML += `<button class="override-btn active" onclick="removeOverride(${index})">✓ Override  -  Remove</button>`;
