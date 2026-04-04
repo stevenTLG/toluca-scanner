@@ -87,11 +87,10 @@
   .hook-text:hover { border-color: var(--border); }
   .hook-edit { width: 100%; font-size: 12px; font-style: italic; background: var(--dark-3); color: var(--text); border: 1px solid var(--gold); border-radius: 4px; padding: 6px; resize: vertical; min-height: 60px; font-family: 'DM Sans', sans-serif; line-height: 1.5; }
   .hook-save-btn { font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--green); background: transparent; color: var(--green); cursor: pointer; margin-top: 4px; }
-  .notes-cell { max-width: 200px; }
-  .notes-text { font-size: 11px; color: var(--text-muted); font-style: italic; cursor: pointer; padding: 4px; border: 1px dashed transparent; border-radius: 4px; min-height: 20px; line-height: 1.4; }
-  .notes-text:hover { border-color: var(--border); }
-  .notes-text.has-notes { color: var(--amber); font-style: normal; }
-  .notes-edit { width: 100%; font-size: 11px; background: var(--dark-3); color: var(--text); border: 1px solid var(--amber); border-radius: 4px; padding: 5px; resize: vertical; min-height: 50px; font-family: 'DM Sans', sans-serif; }
+  .note-icon { font-size: 10px; color: var(--text-muted); cursor: pointer; display: inline-block; margin-top: 4px; }
+  .note-icon.has-note { opacity: 1 !important; }
+  tr:hover .note-icon { opacity: 1 !important; }
+  .notes-edit { width: 100%; font-size: 11px; background: var(--dark-3); color: var(--text); border: 1px solid var(--amber); border-radius: 4px; padding: 5px; resize: vertical; min-height: 44px; font-family: 'DM Sans', sans-serif; box-sizing: border-box; }
   .notes-save-btn { font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--amber); background: transparent; color: var(--amber); cursor: pointer; margin-top: 4px; }
   .override-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
   .override-btn { font-size: 10px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; transition: all 0.2s; }
@@ -207,7 +206,6 @@
   <div class="page-nav">
     <button class="page-tab active" id="tab-screener" onclick="if(typeof showPage==='function')showPage('screener')">&#9646; Screener</button>
     <button class="page-tab" id="tab-criteria" onclick="if(typeof showPage==='function')showPage('criteria')">&#9881; Criteria &amp; Weights</button>
-    <button class="page-tab" id="tab-email" onclick="if(typeof showPage==='function')showPage('email')">&#9993; Email Template</button>
     <button class="page-tab" id="tab-history" onclick="if(typeof showPage==='function')showPage('history')">&#128197; Batch History</button>
   </div>
   <div id="page-screener" class="page active">
@@ -297,7 +295,7 @@
           <th style="width:85px" class="sortable" onclick="toggleSort('score')">Score</th>
           <th style="width:200px">Connections</th>
           <th style="width:260px">Hook <span style="font-size:9px;opacity:0.5;font-weight:400">(click to edit)</span></th>
-          <th style="width:160px">Notes <span style="font-size:9px;opacity:0.5;font-weight:400">(click to add)</span></th>
+
         </tr>
       </thead>
       <tbody id="tableBody"></tbody>
@@ -675,6 +673,12 @@ async function renderBatchHistory() {
         <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
           ${statusHtml}
           <div style="font-size:11px;color:#555">${date}</div>
+          <button onclick="rollbackBatchFromHistory('${b.batchId}', this)"
+             style="font-size:11px;padding:4px 10px;border:1px solid rgba(232,92,76,0.3);border-radius:6px;color:var(--red);background:transparent;cursor:pointer;font-family:'DM Sans',sans-serif"
+             onmouseover="this.style.background='rgba(232,92,76,0.1)'"
+             onmouseout="this.style.background='transparent'">
+            ✕ Rollback
+          </button>
           <a href="/?batch=${encodeURIComponent(b.batchId)}" 
              style="font-size:11px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);text-decoration:none;transition:all .2s"
              onmouseover="this.style.borderColor='var(--gold)';this.style.color='var(--gold)'"
@@ -687,6 +691,50 @@ async function renderBatchHistory() {
   } catch(e) {
     el.innerHTML = '<div style="font-size:12px;color:var(--red)">Error loading history.</div>';
   }
+}
+
+async function rollbackBatchFromHistory(batchId, btn) {
+  const ok = await showConfirm(
+    'Rollback Batch',
+    `Clear ALL screener data from HubSpot for batch ${batchId}? This removes scores, tracks, hooks, connections, and notes from every contact. Cannot be undone.`,
+    'Rollback', 'Cancel'
+  );
+  if (!ok) return;
+  const origText = btn.textContent;
+  btn.textContent = '...'; btn.disabled = true;
+  try {
+    const resp = await fetch('/api/rollback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ batch_id: batchId })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      // Remove from localStorage history
+      await removeBatchFromHistory(batchId);
+      // Clear contact meta for this batch
+      try { localStorage.removeItem('tl_contact_meta_' + batchId); } catch(e) {}
+      btn.textContent = '✓ Done';
+      btn.style.color = 'var(--green)';
+      setTimeout(() => renderBatchHistory(), 1000);
+    } else {
+      await showAlert('Rollback failed: ' + (data.error || 'Unknown error'));
+      btn.textContent = origText; btn.disabled = false;
+    }
+  } catch(e) {
+    await showAlert('Error: ' + e.message);
+    btn.textContent = origText; btn.disabled = false;
+  }
+}
+
+async function removeBatchFromHistory(batchId) {
+  try {
+    const data = await window.storage.get('batch_history').catch(()=>null);
+    if (!data || !data.value) return;
+    let history = JSON.parse(data.value);
+    history = history.filter(b => b.batchId !== batchId);
+    await window.storage.set('batch_history', JSON.stringify(history));
+  } catch(e) {}
 }
 
 // ─── DOM CACHE  -  must be first, everything uses it ───────────
@@ -959,7 +1007,7 @@ async function loadBatchFromHubSpot(batchId) {
   // Show loading skeleton in table
   const tbody = document.getElementById('contacts-tbody');
   if (tbody) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:48px 0;color:var(--text-muted);font-size:13px;letter-spacing:1px">' +
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:48px 0;color:var(--text-muted);font-size:13px;letter-spacing:1px">' +
       '<div style="margin-bottom:10px;font-size:20px">⏳</div>Loading contacts from HubSpot...</td></tr>';
   }
   try {
@@ -1097,6 +1145,10 @@ async function rollbackHubSpot() {
     if (data.ok) {
       // Clear local state too
       results = {}; overrides = {}; notes = {}; hookEdits = {}; pushed = {};
+      // Clear persisted contact meta
+      try { localStorage.removeItem('tl_contact_meta_' + BATCH_ID); } catch(e) {}
+      // Remove from batch history
+      await removeBatchFromHistory(BATCH_ID);
       renderTable(); updateStats();
       btn.textContent = `✓ Cleared ${data.cleared} contacts`;
       btn.style.color = 'var(--green)';
@@ -2346,43 +2398,100 @@ window.addEventListener('beforeunload', (e) => {
   });
 });
 
-// ─── INLINE HOOK EDIT ────────────────────────────────────────
+// ─── HOOK EDIT MODAL ─────────────────────────────────────────
+let _hookModalIndex = null;
+
 function startHookEdit(index) {
-  const cell = document.getElementById(`hook-cell-${index}`);
-  const current = hookEdits[index] || (results[index] && results[index].hook) || '';
-  cell.innerHTML = `<textarea class="hook-edit" id="hook-ta-${index}">${escapeHtml(current)}</textarea><button class="hook-save-btn" onclick="saveHook(${index})">Save</button>`;
-  document.getElementById(`hook-ta-${index}`).focus();
-}
-async function saveHook(index) {
-  const ta = document.getElementById(`hook-ta-${index}`);
-  if (!ta) return;
-  hookEdits[index] = ta.value.trim();
-  await saveHooks();
-  renderRow(index);
-  // Auto-save hook edit to HubSpot immediately
+  _hookModalIndex = index;
   const c = allContacts[index];
   const r = results[index];
+  const current = hookEdits[index] || (r && r.hook) || '';
+
+  // Populate modal
+  const nameEl = document.getElementById('hookModalName');
+  const compEl = document.getElementById('hookModalCompany');
+  const connEl = document.getElementById('hookModalConnections');
+  const ta     = document.getElementById('hookModalTextarea');
+
+  if (nameEl) nameEl.textContent = [c.firstName, c.lastName].filter(Boolean).join(' ') || 'Unknown';
+  if (compEl) compEl.textContent = (c.company || '') + (c.location ? '  ·  ' + c.location : '');
+  if (ta) ta.value = current;
+
+  // Show connections for context
+  const conns = r && r.connections && r.connections.length > 0 ? r.connections : [];
+  if (connEl) {
+    if (conns.length > 0) {
+      connEl.style.display = 'block';
+      connEl.innerHTML = '<span style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:6px">Connections found</span>' +
+        conns.map(cn => `<div style="margin-bottom:3px">
+          <span style="color:var(--gold);font-size:10px;font-weight:600">${escapeHtml(cn.type||'')}</span>
+          <span style="color:#666;margin:0 4px">·</span>
+          <span style="color:var(--text-muted)">${escapeHtml(cn.description||'')}</span>
+        </div>`).join('');
+    } else {
+      connEl.style.display = 'none';
+    }
+  }
+
+  document.getElementById('hookEditModal').classList.add('open');
+  setTimeout(() => { if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }, 100);
+}
+
+function closeHookModal() {
+  document.getElementById('hookEditModal').classList.remove('open');
+  _hookModalIndex = null;
+}
+
+async function saveHookModal() {
+  if (_hookModalIndex === null) return;
+  const ta = document.getElementById('hookModalTextarea');
+  if (!ta) return;
+  hookEdits[_hookModalIndex] = ta.value.trim();
+  await saveHooks();
+  renderRow(_hookModalIndex);
+  const c = allContacts[_hookModalIndex];
+  const r = results[_hookModalIndex];
   if (c && c.hubspot_id && r && r.status === 'done') {
     autoSaveToHubSpot(c.hubspot_id, {
-      track:        overrides[index] ? (overrides[index] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track,
-      score:        r.score,
-      hook:         hookEdits[index],
+      track:          overrides[_hookModalIndex] ? (overrides[_hookModalIndex]==='personal'?'Personal Outreach':'Standard Sequence') : r.track,
+      score:          r.score,
+      hook:           hookEdits[_hookModalIndex],
       recommendation: r.recommendation || '',
-      track_reason: r.track_reason || '',
-      connections:  r.connections || [],
-      override:     !!overrides[index],
-      override_note: r._override_note || '',
-      notes:        notes[index] || ''
+      track_reason:   r.track_reason || '',
+      connections:    r.connections || [],
+      override:       !!overrides[_hookModalIndex],
+      override_note:  r._override_note || '',
+      notes:          notes[_hookModalIndex] || ''
     });
   }
+  closeHookModal();
 }
+
+async function regenerateHookModal() {
+  if (_hookModalIndex === null) return;
+  const ta = document.getElementById('hookModalTextarea');
+  if (ta) ta.value = 'Generating...';
+  const idx = _hookModalIndex;
+  await generateHookForIndex(idx);
+  // Update modal textarea with new hook
+  const newHook = hookEdits[idx] || (results[idx] && results[idx].hook) || '';
+  if (ta) ta.value = newHook;
+}
+// saveHook moved to saveHookModal
 
 // ─── INLINE NOTES EDIT ───────────────────────────────────────
 function startNotesEdit(index) {
-  const cell = document.getElementById(`notes-cell-${index}`);
-  const current = notes[index] || '';
-  cell.innerHTML = `<textarea class="notes-edit" id="notes-ta-${index}">${escapeHtml(current)}</textarea><button class="notes-save-btn" onclick="saveNote(${index})">Save</button>`;
-  document.getElementById(`notes-ta-${index}`).focus();
+  toggleNotesInline(index); // legacy compat
+}
+function toggleNotesInline(index) {
+  const el = document.getElementById(`notes-inline-${index}`);
+  if (!el) return;
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'block';
+  if (!open) {
+    const ta = document.getElementById(`notes-ta-${index}`);
+    if (ta) { ta.value = notes[index] || ''; ta.focus(); }
+  }
 }
 async function saveNote(index) {
   const ta = document.getElementById(`notes-ta-${index}`);
@@ -2420,7 +2529,11 @@ function buildRowHTML(contact, result, index) {
 
   // CONTACT CELL
   const naics = contact.industry ? `<div class="contact-industry">${escapeHtml(contact.industry.replace(/^\d+ /, '').slice(0,40))}</div>` : '';
-  const contactHTML = `<div class="contact-name">${safeName}</div><div class="contact-company">${safeCompany}</div>${naics}<div class="contact-location">${safeLocation}</div>`;
+  const noteIcon = hasNotes
+    ? `<span class="note-icon has-note" onclick="toggleNotesInline(${index})" title="View/edit note">📝 <span style="font-size:10px;color:var(--amber)">${escapeHtml(notes[index].slice(0,30))}${notes[index].length>30?'...':''}</span></span>`
+    : `<span class="note-icon" onclick="toggleNotesInline(${index})" title="Add note" style="opacity:0;transition:opacity .15s">+ note</span>`;
+  const notesInline = `<div class="notes-inline" id="notes-inline-${index}" style="display:none;margin-top:6px"><textarea class="notes-edit" id="notes-ta-${index}" placeholder="Add a note..." style="min-height:44px;font-size:11px">${escapeHtml(notes[index]||'')}</textarea><button class="notes-save-btn" onclick="saveNote(${index})">Save</button></div>`;
+  const contactHTML = `<div class="contact-name">${safeName}</div><div class="contact-company">${safeCompany}</div>${naics}<div class="contact-location">${safeLocation}</div>${noteIcon}${notesInline}`;
 
   // TRACK CELL
   let trackHTML;
@@ -2480,17 +2593,10 @@ function buildRowHTML(contact, result, index) {
 
   // HOOK CELL (editable) — shows email preview button if template is set
   const isPersonalFinal = (result && result.track === 'Personal Outreach') || hasOverride;
-  const hasTemplate = !!(emailTemplate.subject || emailTemplate.body);
+  const hasTemplate = false; // email template removed
   let hookCellContent;
   if (!result || result.status !== 'done') {
     hookCellContent = '<span style="color:var(--text-muted);font-size:12px"> - </span>';
-  } else if (hasTemplate && result.status === 'done') {
-    // Show email preview button + hook text
-    const hookPreview = currentHook ? `<div class="hook-text" onclick="startHookEdit(${index})" title="Click to edit" style="font-size:11px;color:var(--text-muted);margin-top:4px">${escapeHtml(currentHook.slice(0,80))}${currentHook.length>80?'...':''}</div>` : '';
-    hookCellContent = `<div class="hook-cell-inner">
-      <button onclick="toggleEmailPreview(${index})" style="font-size:10px;font-weight:600;letter-spacing:0.5px;padding:3px 10px;border-radius:4px;border:1px solid rgba(201,168,76,0.4);background:rgba(201,168,76,0.1);color:var(--gold);cursor:pointer" title="View full email draft">&#9993; View Email</button>
-      ${hookPreview}
-    </div>`;
   } else if (isPersonalFinal && currentHook) {
     hookCellContent = `<div class="hook-text" onclick="startHookEdit(${index})" title="Click to edit">${escapeHtml(currentHook)}</div>`;
   } else if (isPersonalFinal) {
@@ -2500,11 +2606,8 @@ function buildRowHTML(contact, result, index) {
   }
   const hookCell = `<div class="hook-cell" id="hook-cell-${index}">${hookCellContent}</div>`;
 
-  // NOTES CELL (editable)
-  const notesContent = hasNotes
-    ? `<div class="notes-text has-notes" onclick="startNotesEdit(${index})">${escapeHtml(notes[index])}</div>`
-    : `<div class="notes-text" onclick="startNotesEdit(${index})">+ Add note...</div>`;
-  const notesCell = `<div class="notes-cell" id="notes-cell-${index}">${notesContent}</div>`;
+  // Notes — hidden, accessible via icon in contact cell
+  const notesCell = ''; // kept for compat
 
   // DRAWER TOGGLE  -  only show if contact has been screened
   const hasDebug = result && result.status === 'done';
@@ -2519,7 +2622,7 @@ function buildRowHTML(contact, result, index) {
     <td>${scoreHTML}</td>
     <td>${connectionsHTML}</td>
     <td>${hookCell}</td>
-    <td>${notesCell}</td>`;
+`;
 }
 
 // ─── RENDER ──────────────────────────────────────────────────
@@ -2544,7 +2647,7 @@ function toggleDrawer(index) {
     drawer = document.createElement('tr');
     drawer.id = `drawer-${index}`;
     drawer.className = 'debug-drawer';
-    drawer.innerHTML = `<td colspan="7">${buildDrawerHTML(allContacts[index], results[index], index)}</td>`;
+    drawer.innerHTML = `<td colspan="6">${buildDrawerHTML(allContacts[index], results[index], index)}</td>`;
     row.insertAdjacentElement('afterend', drawer);
   }
   const isOpen = drawer.classList.toggle('open');
@@ -2690,7 +2793,7 @@ function renderTable() {
       if (cluster !== lastCluster) {
         const sep = document.createElement('tr');
         sep.className = 'cluster-header';
-        sep.innerHTML = `<td colspan="7">⊞ ${cluster}</td>`;
+        sep.innerHTML = `<td colspan="6">⊞ ${cluster}</td>`;
         tbody.appendChild(sep);
         lastCluster = cluster;
       }
@@ -2706,7 +2809,7 @@ function renderTable() {
       const drawer = document.createElement('tr');
       drawer.id = `drawer-${i}`;
       drawer.className = 'debug-drawer open';
-      drawer.innerHTML = `<td colspan="7">${buildDrawerHTML(allContacts[i], results[i], i)}</td>`;
+      drawer.innerHTML = `<td colspan="6">${buildDrawerHTML(allContacts[i], results[i], i)}</td>`;
       tbody.appendChild(drawer);
       const toggle = document.getElementById(`drawer-toggle-${i}`);
       if (toggle) { toggle.textContent = '▼'; toggle.classList.add('open'); }
@@ -3393,7 +3496,7 @@ function toggleEmailPreview(index) {
 
   const previewRow = document.createElement('tr');
   previewRow.id = existingId;
-  previewRow.innerHTML = `<td colspan="7" style="padding:0">
+  previewRow.innerHTML = `<td colspan="6" style="padding:0">
     <div style="background:var(--dark-2);border-left:3px solid var(--gold);padding:20px 24px;margin:0">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
         <div>
@@ -3680,47 +3783,26 @@ function getFullEmail(contact, result, index) {
     </div>
   </div>
 
-  <div id="page-email" class="page">
-    <div style="max-width:860px;margin:32px auto;padding:0 24px">
-      <div style="margin-bottom:28px">
-        <h2 style="font-size:18px;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-bottom:6px">Email Template</h2>
-        <p style="font-size:12px;color:var(--text-muted);line-height:1.6">Write your outreach template below. Use <strong style="color:var(--text)">[FIRST_NAME]</strong>, <strong style="color:var(--text)">[COMPANY]</strong>, and <strong style="color:var(--text)">[HOOK]</strong> as placeholders. Use <strong style="color:var(--gold)">{option1|option2|option3}</strong> for spintax — same contact always gets the same variation.</p>
-      </div>
 
-      <div style="margin-bottom:20px">
-        <label style="display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Subject Line</label>
-        <input id="emailSubject" oninput="autoSaveEmailTemplate()" type="text" placeholder="{Quick question|A thought|Reaching out} about [COMPANY]" style="width:100%;background:var(--dark-3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:10px 14px;box-sizing:border-box;">
-      </div>
 
-      <div style="margin-bottom:20px">
-        <label style="display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Email Body</label>
-        <textarea id="emailBody" oninput="autoSaveEmailTemplate()" rows="16" placeholder="Hi [FIRST_NAME],&#10;&#10;[HOOK]&#10;&#10;I'm Steven Pavlov — I'm looking to acquire one exceptional company to operate long-term as a steward, not a financial engineer.&#10;&#10;Would you be open to a brief conversation?&#10;&#10;Best,&#10;Steven" style="width:100%;background:var(--dark-3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:12px 14px;box-sizing:border-box;resize:vertical;line-height:1.7"></textarea>
-      </div>
-
-      <div style="display:flex;gap:12px;align-items:center;margin-bottom:32px">
-        <button onclick="saveEmailTemplate()" style="background:var(--gold);color:#1a1a1a;border:none;border-radius:6px;padding:10px 22px;font-weight:700;font-size:13px;cursor:pointer;letter-spacing:0.5px">&#10003; Save Template</button>
-        <button onclick="previewSampleEmail()" style="background:var(--dark-3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:10px 22px;font-size:13px;cursor:pointer">&#128065; Preview with Sample</button>
-        <span id="emailSaved" style="font-size:12px;color:var(--green);display:none">&#10003; Saved</span>
-      </div>
-
-      <div id="emailPreviewBox" style="display:none;background:var(--dark-3);border:1px solid var(--border);border-radius:8px;padding:20px 24px">
-        <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px">Preview</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Subject: <span id="previewSubject" style="color:var(--text)"></span></div>
-        <div style="border-top:1px solid var(--border);margin:12px 0"></div>
-        <div id="previewBody" style="font-size:13px;color:var(--text);line-height:1.8;white-space:pre-wrap"></div>
-      </div>
-
-      <div style="margin-top:40px;padding-top:24px;border-top:1px solid var(--border)">
-        <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px">Spintax Reference</div>
-        <div style="font-size:12px;color:var(--text-muted);line-height:2">
-          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">{Hi|Hello|Good morning}</code> — picks one per contact, consistent<br>
-          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">[FIRST_NAME]</code> — owner first name<br>
-          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">[COMPANY]</code> — company name<br>
-          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">[HOOK]</code> — AI-generated personal connection sentence<br>
-          <code style="background:var(--dark-2);padding:2px 6px;border-radius:3px;color:var(--gold)">[TRACK]</code> — Personal Outreach or Standard Sequence
-        </div>
-      </div>
+<!-- Hook Edit Modal -->
+<div class="modal-overlay" id="hookEditModal">
+  <div class="modal" style="max-width:580px;width:94%">
+    <div style="margin-bottom:4px">
+      <div style="font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-bottom:4px">Edit Hook</div>
+      <div style="font-size:15px;font-weight:600;color:var(--text)" id="hookModalName"></div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px" id="hookModalCompany"></div>
     </div>
-  </div><!-- end page-email -->
+    <!-- Connections context -->
+    <div id="hookModalConnections" style="margin-bottom:12px;font-size:11px;color:var(--text-muted);background:var(--dark-3);border-radius:6px;padding:8px 12px;border:1px solid var(--border);display:none"></div>
+    <textarea id="hookModalTextarea" style="width:100%;min-height:120px;background:var(--dark-3);color:var(--text);border:1px solid var(--gold);border-radius:6px;padding:12px;font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.7;resize:vertical;box-sizing:border-box" placeholder="Write a 2-sentence personal opener..."></textarea>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:6px">2 sentences. First establishes the connection. Second pivots to interest in the business.</div>
+    <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end">
+      <button onclick="closeHookModal()" style="padding:9px 20px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:12px;cursor:pointer">Cancel</button>
+      <button onclick="regenerateHookModal()" style="padding:9px 20px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:12px;cursor:pointer">⟳ Regenerate</button>
+      <button onclick="saveHookModal()" style="padding:9px 22px;background:var(--gold);border:none;border-radius:6px;color:#0F0F0F;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:0.5px">Save Hook</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
