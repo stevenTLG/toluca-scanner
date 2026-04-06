@@ -472,31 +472,24 @@ def push_replyio():
         email = c.get('email', '')
         hook  = c.get('hook', '')
 
-        # Step 1: Create/update contact with hook variable
+        # Single call: create contact AND enroll in campaign
+        # Reply.io v1: POST /v1/people with campaignId enrolls in sequence
         person_payload = {
             'email': email,
             'firstName': c.get('firstName', ''),
             'lastName': c.get('lastName', ''),
+            'campaignId': int(seq_id),
             'variables': [{'name': 'hook', 'value': hook}]
         }
         p_resp = requests.post('https://api.reply.io/v1/people',
                       headers=headers, json=person_payload, timeout=15)
-        debug_log.append({'step': 'create_person', 'email': email, 'status': p_resp.status_code, 'body': p_resp.text[:200]})
+        debug_log.append({'step': 'create_and_enroll', 'email': email, 'seq_id': seq_id, 'status': p_resp.status_code, 'body': p_resp.text[:300]})
 
-        # Step 2: Enroll via campaigns endpoint
-        enroll_resp = requests.post(
-            f'https://api.reply.io/v1/campaigns/{seq_id}/people',
-            headers=headers,
-            json={'email': email},
-            timeout=15
-        )
-        debug_log.append({'step': 'enroll', 'email': email, 'seq_id': seq_id, 'status': enroll_resp.status_code, 'body': enroll_resp.text[:200]})
-
-        if enroll_resp.ok:
+        if p_resp.ok:
             enrolled += 1
         else:
             failed += 1
-            errors.append({'email': email, 'status': enroll_resp.status_code, 'body': enroll_resp.text[:200]})
+            errors.append({'email': email, 'status': p_resp.status_code, 'body': p_resp.text[:300]})
 
     return jsonify({'ok': True, 'enrolled': enrolled, 'failed': failed, 'errors': errors, 'debug': debug_log})
 
