@@ -463,6 +463,7 @@ def push_replyio():
 
     enrolled, failed, errors = 0, 0, []
     headers = {'x-api-key': REPLYIO_KEY, 'Content-Type': 'application/json'}
+    debug_log = []
     for c in contacts:
         track  = c.get('track', 'Standard Sequence')
         seq_id = personal_seq if track == 'Personal Outreach' else standard_seq
@@ -476,27 +477,28 @@ def push_replyio():
             'email': email,
             'firstName': c.get('firstName', ''),
             'lastName': c.get('lastName', ''),
-            'variables': [
-                {'name': 'hook', 'value': hook}
-            ]
+            'variables': [{'name': 'hook', 'value': hook}]
         }
-        requests.post('https://api.reply.io/v1/people',
+        p_resp = requests.post('https://api.reply.io/v1/people',
                       headers=headers, json=person_payload, timeout=15)
+        debug_log.append({'step': 'create_person', 'email': email, 'status': p_resp.status_code, 'body': p_resp.text[:300]})
 
-        # Step 2: Enroll in sequence using the dedicated campaign endpoint
+        # Step 2: Enroll in sequence
         enroll_resp = requests.post(
             f'https://api.reply.io/v1/people/{email}/addtocampaign',
             headers=headers,
             json={'campaignId': seq_id},
             timeout=15
         )
+        debug_log.append({'step': 'enroll', 'email': email, 'seq_id': seq_id, 'status': enroll_resp.status_code, 'body': enroll_resp.text[:300]})
+
         if enroll_resp.ok:
             enrolled += 1
         else:
             failed += 1
-            errors.append({'email': email, 'status': enroll_resp.status_code, 'body': enroll_resp.text[:200]})
+            errors.append({'email': email, 'status': enroll_resp.status_code, 'body': enroll_resp.text[:300]})
 
-    return jsonify({'ok': True, 'enrolled': enrolled, 'failed': failed, 'errors': errors})
+    return jsonify({'ok': True, 'enrolled': enrolled, 'failed': failed, 'errors': errors, 'debug': debug_log})
 
 
 # ── POST /api/rollback ───────────────────────────────────────────────────────
