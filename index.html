@@ -1112,6 +1112,16 @@ function showBatchControls(batchId) {
     <span style="font-size:12px;color:var(--gold);font-weight:600;letter-spacing:0.5px">${batchId}</span>
     <span style="font-size:11px;color:var(--text-muted)">${allContacts.length} contacts</span>
     <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <span style="font-size:10px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">Personal ID</span>
+      <input id="inline-personal-seq" type="text" placeholder="e.g. 1657027"
+        style="width:90px;padding:5px 8px;background:var(--dark-3);color:var(--gold);border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace"
+        oninput="saveInlineSeqIds()" />
+      <span style="font-size:10px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">Standard ID</span>
+      <input id="inline-standard-seq" type="text" placeholder="e.g. 1657041"
+        style="width:90px;padding:5px 8px;background:var(--dark-3);color:var(--gold);border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace"
+        oninput="saveInlineSeqIds()" />
+    </div>
     <button class="btn btn-secondary" onclick="writeResultsToHubSpot()" style="font-size:12px;padding:8px 16px" id="btn-write-hs">
       ↑ Write to HubSpot
     </button>
@@ -1122,6 +1132,16 @@ function showBatchControls(batchId) {
       → Push to Reply.io
     </button>
   `;
+  // Populate inline fields from saved storage
+  window.storage.get('replyio_sequences').then(data => {
+    if (data && data.value) {
+      const seqs = JSON.parse(data.value);
+      const pEl = document.getElementById('inline-personal-seq');
+      const sEl = document.getElementById('inline-standard-seq');
+      if (pEl) pEl.value = seqs.personal || '';
+      if (sEl) sEl.value = seqs.standard || '';
+    }
+  }).catch(()=>{});
   toolbar.parentNode.insertBefore(bar, toolbar);
 }
 
@@ -1227,27 +1247,41 @@ async function writeResultsToHubSpot() {
   }
 }
 
+async function saveInlineSeqIds() {
+  const pEl = document.getElementById('inline-personal-seq');
+  const sEl = document.getElementById('inline-standard-seq');
+  if (!pEl || !sEl) return;
+  try {
+    await window.storage.set('replyio_sequences', JSON.stringify({
+      personal: pEl.value.trim(),
+      standard: sEl.value.trim()
+    }));
+  } catch(e) {}
+}
+
 async function pushToReplyIo() {
   const btn = document.getElementById('btn-push-reply');
 
-  // Load stored sequence IDs
-  let personalSeqId = '', standardSeqId = '';
-  try {
-    const seqData = await window.storage.get('replyio_sequences').catch(()=>null);
-    if (seqData && seqData.value) {
-      const seqs = JSON.parse(seqData.value);
-      personalSeqId = seqs.personal || '';
-      standardSeqId = seqs.standard || '';
-    }
-  } catch(e) {}
+  // Read from inline fields first, fall back to storage
+  const pInline = (document.getElementById('inline-personal-seq') || {}).value || '';
+  const sInline = (document.getElementById('inline-standard-seq') || {}).value || '';
+  let personalSeqId = pInline.trim();
+  let standardSeqId = sInline.trim();
 
-  // Fall back to prompt if not configured
   if (!personalSeqId || !standardSeqId) {
-    const msg = 'Reply.io sequence IDs not configured.\n\nGo to Criteria & Weights tab → Reply.io Sequences → enter your IDs and Save All.\n\nEnter Personal Outreach sequence ID now (or cancel):';
-    personalSeqId = prompt(msg);
-    if (!personalSeqId) return;
-    standardSeqId = prompt('Standard Sequence sequence ID:');
-    if (!standardSeqId) return;
+    try {
+      const seqData = await window.storage.get('replyio_sequences').catch(()=>null);
+      if (seqData && seqData.value) {
+        const seqs = JSON.parse(seqData.value);
+        personalSeqId = personalSeqId || seqs.personal || '';
+        standardSeqId = standardSeqId || seqs.standard || '';
+      }
+    } catch(e) {}
+  }
+
+  if (!personalSeqId || !standardSeqId) {
+    await showAlert('Enter your Reply.io sequence IDs in the fields above before pushing.');
+    return;
   }
 
   const contacts = allContacts
