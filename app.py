@@ -462,19 +462,39 @@ def push_replyio():
     if not contacts: return jsonify({'error': 'No contacts'}), 400
 
     enrolled, failed, errors = 0, 0, []
+    headers = {'x-api-key': REPLYIO_KEY, 'Content-Type': 'application/json'}
     for c in contacts:
         track  = c.get('track', 'Standard Sequence')
         seq_id = personal_seq if track == 'Personal Outreach' else standard_seq
         if not seq_id:
             failed += 1; errors.append({'email': c.get('email'), 'error': 'No sequence ID'}); continue
-        resp = requests.post('https://api.reply.io/v1/people',
-                             headers={'x-api-key': REPLYIO_KEY, 'Content-Type': 'application/json'},
-                             json={'email': c.get('email',''), 'firstName': c.get('firstName',''),
-                                   'lastName': c.get('lastName',''), 'sequenceId': seq_id,
-                                   'variables': {'hook': c.get('hook',''), 'track': track}},
-                             timeout=15)
-        if resp.ok: enrolled += 1
-        else: failed += 1; errors.append({'email': c.get('email'), 'status': resp.status_code})
+        email = c.get('email', '')
+        hook  = c.get('hook', '')
+
+        # Step 1: Create or update the contact
+        person_payload = {
+            'email': email,
+            'firstName': c.get('firstName', ''),
+            'lastName': c.get('lastName', ''),
+            'variables': [
+                {'name': 'hook', 'value': hook}
+            ]
+        }
+        requests.post('https://api.reply.io/v1/people',
+                      headers=headers, json=person_payload, timeout=15)
+
+        # Step 2: Enroll in sequence using the dedicated campaign endpoint
+        enroll_resp = requests.post(
+            f'https://api.reply.io/v1/people/{email}/addtocampaign',
+            headers=headers,
+            json={'campaignId': seq_id},
+            timeout=15
+        )
+        if enroll_resp.ok:
+            enrolled += 1
+        else:
+            failed += 1
+            errors.append({'email': email, 'status': enroll_resp.status_code, 'body': enroll_resp.text[:200]})
 
     return jsonify({'ok': True, 'enrolled': enrolled, 'failed': failed, 'errors': errors})
 
