@@ -112,9 +112,9 @@
   .modal p { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
   .modal textarea { width: 100%; background: var(--dark-3); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: 'DM Sans', sans-serif; font-size: 13px; resize: vertical; min-height: 80px; }
   .modal-btns { display: flex; gap: 10px; margin-top: 14px; justify-content: flex-end; }
-  .modal-btn { padding: 8px 18px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; }
+  .modal-btn { padding: 8px 18px; border-radius: 6px; font-size: 12px; font-weight: 600; font-family: 'DM Sans', sans-serif; letter-spacing: 0.5px; cursor: pointer; border: none; transition: all 0.2s; }
   .modal-btn-confirm { background: var(--gold); color: var(--dark); }
-  .modal-btn-cancel { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
+  .modal-btn-cancel { background: transparent; color: var(--text-muted); border: 1px solid var(--border); font-family: 'DM Sans', sans-serif; }
   .timing-bar { display: flex; gap: 20px; margin-top: 8px; flex-wrap: wrap; }
   .timing-stat { font-size: 11px; color: var(--text-muted); }
   .timing-stat span { color: var(--gold); font-weight: 600; }
@@ -213,7 +213,7 @@
   <div class="controls">
     <div class="controls-left">
       <h2 id="controlTitle">Ready</h2>
-      <p id="controlDesc">Click Run Screener — the server processes all contacts in the background. You can close this tab.</p>
+      <p id="controlDesc">Click Run Screener — the server screens each contact using AI and web search, then writes results directly to HubSpot. You can close this tab while it runs.</p>
       <div id="server-progress" style="display:none;margin-top:12px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <span id="server-progress-label" style="font-size:11px;color:var(--text-muted)">Starting...</span>
@@ -697,7 +697,7 @@ async function rollbackBatchFromHistory(batchId, btn) {
   const ok = await showConfirm(
     'Rollback Batch',
     `Clear ALL screener data from HubSpot for batch ${batchId}? This removes scores, tracks, hooks, connections, and notes from every contact. Cannot be undone.`,
-    'Rollback', 'Cancel'
+    'Rollback HubSpot', 'Cancel'
   );
   if (!ok) return;
   const origText = btn.textContent;
@@ -710,13 +710,28 @@ async function rollbackBatchFromHistory(batchId, btn) {
     });
     const data = await resp.json();
     if (data.ok) {
-      // Remove from localStorage history
-      await removeBatchFromHistory(batchId);
-      // Clear contact meta for this batch
-      try { localStorage.removeItem('tl_contact_meta_' + batchId); } catch(e) {}
-      btn.textContent = '✓ Done';
+      // Also offer Reply.io rollback
+      const alsoReply = await showConfirm(
+        'Also Rollback Reply.io?',
+        `HubSpot cleared (${data.cleared} contacts). Do you also want to delete these contacts from Reply.io?`,
+        'Yes, Remove from Reply.io', 'No'
+      );
+      if (alsoReply) {
+        btn.textContent = 'Removing from Reply.io...';
+        const rResp = await fetch('/api/rollback-replyio', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ batch_id: batchId })
+        });
+        const rData = await rResp.json();
+        btn.textContent = rData.ok ? `✓ Done (${rData.deleted} removed)` : '✓ HS done, Reply.io failed';
+      } else {
+        btn.textContent = '✓ Done';
+      }
       btn.style.color = 'var(--green)';
-      setTimeout(() => renderBatchHistory(), 1000);
+      await removeBatchFromHistory(batchId);
+      try { localStorage.removeItem('tl_contact_meta_' + batchId); } catch(e) {}
+      setTimeout(() => renderBatchHistory(), 1500);
     } else {
       await showAlert('Rollback failed: ' + (data.error || 'Unknown error'));
       btn.textContent = origText; btn.disabled = false;
@@ -1128,6 +1143,9 @@ function showBatchControls(batchId) {
     <button class="btn btn-secondary" onclick="rollbackHubSpot()" style="font-size:12px;padding:8px 16px;color:var(--red);border-color:rgba(232,92,76,0.4)" id="btn-rollback">
       ✕ Rollback HubSpot
     </button>
+    <button class="btn btn-secondary" onclick="rollbackReplyIo()" style="font-size:12px;padding:8px 16px;color:var(--red);border-color:rgba(232,92,76,0.4)" id="btn-rollback-reply">
+      ✕ Rollback Reply.io
+    </button>
     <button class="btn btn-primary" onclick="pushToReplyIo()" style="font-size:12px;padding:8px 16px" id="btn-push-reply">
       → Push to Reply.io
     </button>
@@ -1189,6 +1207,42 @@ async function rollbackHubSpot() {
   } catch(e) {
     await showAlert('Rollback error: ' + e.message);
     btn.textContent = '✕ Rollback HubSpot'; btn.disabled = false;
+  }
+}
+
+async function rollbackReplyIo() {
+  if (!BATCH_ID) { await showAlert('No batch loaded.'); return; }
+  const ok = await showConfirm(
+    'Rollback Reply.io',
+    `This will delete ALL contacts in batch ${BATCH_ID} from Reply.io, removing them from their sequences. This cannot be undone. Continue?`,
+    'Rollback', 'Cancel'
+  );
+  if (!ok) return;
+  const btn = document.getElementById('btn-rollback-reply');
+  btn.textContent = 'Rolling back...'; btn.disabled = true;
+  try {
+    const resp = await fetch('/api/rollback-replyio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ batch_id: BATCH_ID })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      pushed = {};
+      btn.textContent = `✓ Removed ${data.deleted} contacts`;
+      btn.style.color = 'var(--green)';
+      setTimeout(() => {
+        btn.textContent = '✕ Rollback Reply.io';
+        btn.style.color = 'var(--red)';
+        btn.disabled = false;
+      }, 3000);
+    } else {
+      await showAlert('Reply.io rollback failed: ' + (data.error || 'Unknown error'));
+      btn.textContent = '✕ Rollback Reply.io'; btn.disabled = false;
+    }
+  } catch(e) {
+    await showAlert('Reply.io rollback error: ' + e.message);
+    btn.textContent = '✕ Rollback Reply.io'; btn.disabled = false;
   }
 }
 
@@ -3767,14 +3821,14 @@ function getFullEmail(contact, result, index) {
     <div class="threshold-row">
       <label>Personal Outreach Threshold</label>
       <input type="number" class="threshold-input" id="thresholdInput" oninput="autoSaveCriteria()" min="1" max="100" value="40" oninput="updateThresholdPct()">
-      <div class="threshold-desc">Contacts scoring above this qualify for Personal Outreach. Currently <strong><span id="thresholdPct" style="color:var(--gold)"> - </span></strong> of screened contacts qualify. Adjust so ~10% qualify based on your weekly email capacity.</div>
+      <div class="threshold-desc">Contacts scoring above this qualify for Personal Outreach. Currently <strong><span id="thresholdPct" style="color:var(--gold)"> - </span></strong> of screened contacts qualify. Aim for ~10% based on your weekly sending capacity — too high and Personal Outreach loses meaning, too low and you miss real connections.</div>
     </div>
 
     <div class="criteria-grid">
       <div class="criteria-card">
         <h3>Connection Triggers</h3>
-        <p style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Set weight for each signal. High = strong upgrade trigger. Low = minor bonus.</p>
-        <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px">☑ Check up to <strong style="color:var(--gold)">4 criteria</strong> to include in Search 2. Checked criteria are searched regardless of weight. <span id="searchSelectedCount" class="search-selected-count">0/4 selected</span></p>
+        <p style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Set the weight for each signal. <strong style="color:var(--gold)">High</strong> = strong upgrade trigger that can push a contact into Personal Outreach. <strong style="color:var(--amber)">Medium</strong> = meaningful bonus. <strong style="color:var(--text-muted)">Low</strong> = minor boost only.</p>
+        <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px">☑ Check up to <strong style="color:var(--gold)">4 criteria</strong> to include in Search 2 — these are the specific terms the AI will search for to find personal connection signals. <span id="searchSelectedCount" class="search-selected-count">0/4 selected</span></p>
         <div id="triggersList"></div>
       </div>
       <div class="criteria-card">
@@ -3789,15 +3843,15 @@ function getFullEmail(contact, result, index) {
       <!-- Reply.io Sequences -->
       <div class="criteria-card" style="grid-column:1/-1">
         <h3 style="margin-bottom:6px">Reply.io Sequences</h3>
-        <p style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Set your sequence IDs once here — used every time you push to Reply.io. Find these in Reply.io → Sequences → click a sequence → the ID is in the URL.</p>
+        <p style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Set your sequence IDs once here — used every time you push to Reply.io. Find these in Reply.io → Sequences → click a sequence → the ID is in the URL. Personal Outreach ID: <strong style="color:var(--gold)">1657027</strong> · Standard Outreach ID: <strong style="color:var(--gold)">1657041</strong>.</p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
           <div class="profile-field">
             <label>Personal Outreach Sequence ID</label>
-            <input type="text" id="replyio-personal-seq" placeholder="e.g. 12345" style="font-family:monospace">
+            <input type="text" id="replyio-personal-seq" placeholder="e.g. 1657027" style="font-family:monospace">
           </div>
           <div class="profile-field">
-            <label>Standard Sequence Sequence ID</label>
-            <input type="text" id="replyio-standard-seq" placeholder="e.g. 67890" style="font-family:monospace">
+            <label>Standard Outreach Sequence ID</label>
+            <input type="text" id="replyio-standard-seq" placeholder="e.g. 1657041" style="font-family:monospace">
           </div>
         </div>
       </div>
@@ -3805,7 +3859,7 @@ function getFullEmail(contact, result, index) {
 
     <div class="feedback-box">
       <h3>Feedback &amp; Calibration Notes</h3>
-      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Add observations from screening runs  -  what signals the AI missed, false positives, patterns you noticed. Saved feedback gets injected into future screening prompts.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Add observations from screening runs — what signals the AI missed, false positives, or patterns you noticed. These notes are injected into every future screening prompt as calibration context.</p>
       <div id="feedbackList"></div>
       <textarea class="feedback-textarea" id="feedbackInput" placeholder="e.g. Sacramento geography alone should not score above 15  -  need additional signal. Or: Veteran-owned businesses are being under-scored when service branch is not explicitly mentioned."></textarea>
       <div style="display:flex;gap:10px;margin-top:12px;align-items:center;flex-wrap:wrap">
@@ -3823,10 +3877,10 @@ function getFullEmail(contact, result, index) {
           <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:2px;margin-bottom:6px">Batch History</div>
           <div style="font-family:'Playfair Display',serif;font-size:22px;color:var(--gold)">All Screened Batches</div>
         </div>
-        <button onclick="renderBatchHistory()" style="font-size:11px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-muted);cursor:pointer;font-family:'DM Sans',sans-serif;letter-spacing:0.5px">Refresh</button>
+        <button onclick="renderBatchHistory()" class="btn btn-secondary" style="font-size:11px;padding:6px 14px">Refresh</button>
       </div>
       <div style="background:var(--dark-2);border-radius:12px;padding:20px 24px;border:1px solid var(--border)">
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:16px">Click "Open →" on any batch to reload it into the screener. Previously screened contacts will be pre-populated — only unscreened contacts need to be re-run.</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:16px">Click "Open →" to reload a batch into the screener. Previously screened contacts are pre-populated — only unscreened contacts will be re-run. Use Rollback to clear a batch from HubSpot and/or Reply.io.</div>
         <div id="batch-history-list">
           <div style="font-size:12px;color:var(--text-muted);padding:20px 0">Loading...</div>
         </div>
@@ -3849,9 +3903,9 @@ function getFullEmail(contact, result, index) {
     <textarea id="hookModalTextarea" style="width:100%;min-height:120px;background:var(--dark-3);color:var(--text);border:1px solid var(--gold);border-radius:6px;padding:12px;font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.7;resize:vertical;box-sizing:border-box" placeholder="Write a 2-sentence personal opener..."></textarea>
     <div style="font-size:11px;color:var(--text-muted);margin-top:6px">2 sentences. First establishes the connection. Second pivots to interest in the business.</div>
     <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end">
-      <button onclick="closeHookModal()" style="padding:9px 20px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:12px;cursor:pointer">Cancel</button>
-      <button onclick="regenerateHookModal()" style="padding:9px 20px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:12px;cursor:pointer">⟳ Regenerate</button>
-      <button onclick="saveHookModal()" style="padding:9px 22px;background:var(--gold);border:none;border-radius:6px;color:#0F0F0F;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:0.5px">Save Hook</button>
+      <button onclick="closeHookModal()" class="modal-btn modal-btn-cancel">Cancel</button>
+      <button onclick="regenerateHookModal()" class="modal-btn modal-btn-cancel">⟳ Regenerate</button>
+      <button onclick="saveHookModal()" class="modal-btn modal-btn-confirm">Save Hook</button>
     </div>
   </div>
 </div>
