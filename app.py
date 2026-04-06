@@ -441,7 +441,10 @@ def push_replyio():
             errors.append({'email': c.get('email'), 'error': 'No sequence ID'})
             continue
         email = c.get('email', '')
-        hook = c.get('hook', '')
+        raw_hook = c.get('hook', '') or ''
+        # Personal Outreach contacts get their real hook
+        # Standard Sequence contacts get '_' so the Reply.io trigger can route them
+        hook = raw_hook.strip() if (track == 'Personal Outreach' and raw_hook.strip()) else '_'
 
         # Step 1: Create/update contact with hook as custom field
         person_payload = {
@@ -452,38 +455,16 @@ def push_replyio():
         }
         p_resp = requests.post('https://api.reply.io/v1/people',
                                headers=headers, json=person_payload, timeout=15)
-        debug_log.append({'step': 'create_person', 'email': email,
+        debug_log.append({'step': 'create_person', 'email': email, 'hook': hook,
                           'status': p_resp.status_code, 'body': p_resp.text[:200]})
 
-        # Step 2: Get the contact ID from the response
-        contact_id = None
-        try:
-            contact_id = p_resp.json().get('id')
-        except:
-            pass
-
-        # Step 3: Enroll using v2 API with contactId
-        if contact_id:
-            v2_headers = {'x-api-key': REPLYIO_KEY, 'Content-Type': 'application/json'}
-            enroll_payload = {'contactId': contact_id, 'forcePush': True}
-            enroll_resp = requests.post(
-                f'https://api.reply.io/v2/campaigns/{int(seq_id)}/contacts',
-                headers=v2_headers,
-                json=enroll_payload,
-                timeout=15
-            )
-            debug_log.append({'step': 'enroll_v2', 'email': email, 'contact_id': contact_id,
-                              'seq_id': seq_id, 'status': enroll_resp.status_code,
-                              'body': enroll_resp.text[:300]})
-            if enroll_resp.ok:
-                enrolled += 1
-            else:
-                failed += 1
-                errors.append({'email': email, 'status': enroll_resp.status_code,
-                               'body': enroll_resp.text[:300]})
+        # Reply.io triggers handle sequence enrollment automatically based on hook value
+        if p_resp.ok:
+            enrolled += 1
         else:
             failed += 1
-            errors.append({'email': email, 'error': 'Could not get contact ID from create response'})
+            errors.append({'email': email, 'status': p_resp.status_code,
+                           'body': p_resp.text[:300]})
 
     return jsonify({'ok': True, 'enrolled': enrolled, 'failed': failed,
                     'errors': errors, 'debug': debug_log})
