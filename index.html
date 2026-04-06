@@ -2192,38 +2192,38 @@ function closeModal() {
 }
 async function confirmOverride() {
   if (modalIndex === null) return;
-  overrides[modalIndex] = 'personal';
+  const savedModalIndex = modalIndex;
+  overrides[savedModalIndex] = 'personal';
   const noteVal = document.getElementById('modalNotes').value.trim();
-  if (noteVal) notes[modalIndex] = noteVal;
+  if (noteVal) notes[savedModalIndex] = noteVal;
   // Store override note on the result so it gets written to HubSpot
-  if (results[modalIndex]) {
-    results[modalIndex]._override_note = noteVal;
+  if (results[savedModalIndex]) {
+    results[savedModalIndex]._override_note = noteVal;
   }
   closeModal();
-  renderRow(modalIndex);
+  renderRow(savedModalIndex);
   await saveOverrides();
   await saveNotes();
   // Auto-save override to HubSpot immediately
-  const c = allContacts[modalIndex];
-  const r = results[modalIndex];
+  const c = allContacts[savedModalIndex];
+  const r = results[savedModalIndex];
   if (c && c.hubspot_id && r) {
     autoSaveToHubSpot(c.hubspot_id, {
       track:         'Personal Outreach',
       score:         r.score,
-      hook:          hookEdits[modalIndex] !== undefined ? hookEdits[modalIndex] : (r.hook || ''),
+      hook:          hookEdits[savedModalIndex] !== undefined ? hookEdits[savedModalIndex] : (r.hook || ''),
       recommendation: r.recommendation || '',
       track_reason:  r.track_reason || '',
       connections:   r.connections || [],
       override:      true,
       override_note: noteVal,
-      notes:         notes[modalIndex] || ''
+      notes:         notes[savedModalIndex] || ''
     });
   }
   // Generate hook if none exists for this forced-personal contact
-  const savedIdx = modalIndex;
-  const currentHook = hookEdits[savedIdx] !== undefined ? hookEdits[savedIdx] : (r && r.hook) || '';
+  const currentHook = hookEdits[savedModalIndex] !== undefined ? hookEdits[savedModalIndex] : (r && r.hook) || '';
   if (!currentHook.trim()) {
-    generateHookForIndex(savedIdx);
+    generateHookForIndex(savedModalIndex);
   }
 }
 
