@@ -1447,10 +1447,11 @@ if (BATCH_ID) {
     }
   } catch(e) {}
 
-  // Recount
+  // Recount — only count contacts in the current batch
+  const currentContactIds = new Set(allContacts.map(c => c.id));
   personalCount = 0; standardCount = 0; processedCount = 0;
-  Object.values(results).forEach(r => {
-    if (r && r.status === 'done') {
+  Object.entries(results).forEach(([id, r]) => {
+    if (r && r.status === 'done' && currentContactIds.has(id)) {
       processedCount++;
       if (r.track === 'Personal Outreach') personalCount++;
       else standardCount++;
@@ -1458,7 +1459,7 @@ if (BATCH_ID) {
   });
   updateStats();
   renderTable();
-  const remaining = allContacts.length - processedCount;
+  const remaining = Math.max(0, allContacts.length - processedCount);
   DOM['controlTitle'].textContent = remaining === 0 ? `Complete  -  All ${allContacts.length} Contacts Screened` : processedCount > 0 ? `${processedCount} Screened · ${remaining} Remaining` : `Ready to Screen ${allContacts.length} Contacts`;
   DOM['controlDesc'].textContent = processedCount > 0 ? `${personalCount} Personal Outreach · ${standardCount} Standard Sequence` : 'Click Run Screener to analyze all contacts';
 })();
@@ -2191,7 +2192,7 @@ function closeModal() {
 }
 async function confirmOverride() {
   if (modalIndex === null) return;
-  overrides[modalIndex] = true;
+  overrides[modalIndex] = 'personal';
   const noteVal = document.getElementById('modalNotes').value.trim();
   if (noteVal) notes[modalIndex] = noteVal;
   // Store override note on the result so it gets written to HubSpot
@@ -2207,7 +2208,7 @@ async function confirmOverride() {
   const r = results[modalIndex];
   if (c && c.hubspot_id && r) {
     autoSaveToHubSpot(c.hubspot_id, {
-      track:         overrides[modalIndex] ? (overrides[modalIndex] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track,
+      track:         'Personal Outreach',
       score:         r.score,
       hook:          hookEdits[modalIndex] !== undefined ? hookEdits[modalIndex] : (r.hook || ''),
       recommendation: r.recommendation || '',
