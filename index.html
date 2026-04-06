@@ -1140,6 +1140,11 @@ function showBatchControls(batchId) {
       const sEl = document.getElementById('inline-standard-seq');
       if (pEl) pEl.value = seqs.personal || '';
       if (sEl) sEl.value = seqs.standard || '';
+      // Also sync to criteria page fields if open
+      const cpEl = document.getElementById('replyio-personal-seq');
+      const csEl = document.getElementById('replyio-standard-seq');
+      if (cpEl) cpEl.value = seqs.personal || '';
+      if (csEl) csEl.value = seqs.standard || '';
     }
   }).catch(()=>{});
   toolbar.parentNode.insertBefore(bar, toolbar);
@@ -3430,6 +3435,17 @@ function renderCriteriaPage() {
 
   // Feedback list
   renderFeedbackList();
+
+  // Populate Reply.io sequence ID fields from storage
+  window.storage.get('replyio_sequences').then(data => {
+    if (data && data.value) {
+      const seqs = JSON.parse(data.value);
+      const pEl = document.getElementById('replyio-personal-seq');
+      const sEl = document.getElementById('replyio-standard-seq');
+      if (pEl && !pEl.value) pEl.value = seqs.personal || '';
+      if (sEl && !sEl.value) sEl.value = seqs.standard || '';
+    }
+  }).catch(()=>{});
 }
 
 function setWeight(id, w) {
