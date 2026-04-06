@@ -451,6 +451,8 @@ def push_replyio():
             'email': email,
             'firstName': c.get('firstName', ''),
             'lastName': c.get('lastName', ''),
+            'company': c.get('company', ''),
+            'title': c.get('jobTitle', ''),
             'customFields': [{'key': 'hook', 'value': hook}]
         }
         p_resp = requests.post('https://api.reply.io/v1/people',
@@ -468,6 +470,93 @@ def push_replyio():
 
     return jsonify({'ok': True, 'enrolled': enrolled, 'failed': failed,
                     'errors': errors, 'debug': debug_log})
+
+@app.route('/api/rollback-replyio', methods=['POST'])
+def rollback_replyio():
+    REPLYIO_KEY = os.environ.get('REPLYIO_KEY', '')
+    if not REPLYIO_KEY:
+        return jsonify({'error': 'REPLYIO_KEY not configured'}), 500
+    if not HUBSPOT_TOKEN:
+        return jsonify({'error': 'HUBSPOT_TOKEN not configured'}), 500
+    data = request.get_json(force=True)
+    batch_id = data.get('batch_id', '').strip()
+    emails = data.get('emails', [])  # optional: pass emails directly instead of batch_id
+
+    # If no emails passed directly, look them up from HubSpot batch
+    if not emails:
+        if not batch_id:
+            return jsonify({'error': 'batch_id or emails required'}), 400
+        after = None
+        while True:
+            payload = {
+                'filterGroups': [{'filters': [{'propertyName': 'grata_batch', 'operator': 'EQ', 'value': batch_id}]}],
+                'properties': ['email'], 'limit': 100
+            }
+            if after:
+                payload['after'] = after
+            resp = requests.post(f'{HUBSPOT_BASE}/crm/v3/objects/contacts/search',
+                                 headers=hs_headers(), json=payload, timeout=30)
+            if not resp.ok:
+                return jsonify({'error': f'HubSpot fetch failed: {resp.status_code}'}), 500
+            d = resp.json()
+            for c in d.get('results', []):
+                em = c.get('properties', {}).get('email', '')
+                if em:
+                    emails.append(em)
+            nxt = d.get('paging', {}).get('next', {}).get('after')
+            if nxt:
+                after = nxt
+            else:
+                break
+
+    headers = {'x-api-key': REPLYIO_KEY, 'Content-Type': 'application/json'}
+    deleted, failed, errors = 0, 0, []
+
+    for email in emails:
+        if not email:
+            continue
+        # Step 1: look up person ID by email
+        search_resp = requests.get(
+            'https://api.reply.io/v1/people',
+            headers=headers,
+            params={'email': email},
+            timeout=15
+        )
+        if not search_resp.ok:
+            failed += 1
+            errors.append({'email': email, 'error': f'Lookup failed: {search_resp.status_code}'})
+            continue
+        people = search_resp.json()
+        # API returns either a list or a dict with 'people' key
+        if isinstance(people, list):
+            person_list = people
+        else:
+            person_list = people.get('people', [])
+        if not person_list:
+            # Not in Reply.io, skip silently
+            deleted += 1
+            continue
+        person_id = person_list[0].get('id')
+        if not person_id:
+            failed += 1
+            errors.append({'email': email, 'error': 'No person ID returned'})
+            continue
+        # Step 2: delete the person
+        del_resp = requests.delete(
+            f'https://api.reply.io/v1/people/{person_id}',
+            headers=headers,
+            timeout=15
+        )
+        if del_resp.ok or del_resp.status_code == 404:
+            deleted += 1
+        else:
+            failed += 1
+            errors.append({'email': email, 'error': f'Delete failed: {del_resp.status_code} {del_resp.text[:200]}'})
+        time.sleep(0.3)  # gentle rate limiting
+
+    return jsonify({'ok': True, 'deleted': deleted, 'failed': failed,
+                    'total': len(emails), 'errors': errors})
+
 
 @app.route('/api/rollback', methods=['POST'])
 def rollback():
