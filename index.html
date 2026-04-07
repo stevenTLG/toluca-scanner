@@ -1352,6 +1352,8 @@ async function pushToReplyIo() {
         email:     c.email,
         firstName: c.firstName,
         lastName:  c.lastName,
+        company:   c.company  || '',
+        jobTitle:  c.jobTitle || '',
         track,
         hook: hookEdits[i] !== undefined ? hookEdits[i] : (r.hook || '')
       };
@@ -1367,8 +1369,8 @@ async function pushToReplyIo() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contacts,
-        personal_sequence_id: parseInt(personalSeqId),
-        standard_sequence_id: parseInt(standardSeqId)
+        personal_sequence_name: 'Personal sequence',
+        standard_sequence_name: 'Standard sequence'
       })
     });
     const data = await resp.json();
