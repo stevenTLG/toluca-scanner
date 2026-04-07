@@ -508,27 +508,40 @@ def push_replyio():
             errors.append({'email': email, 'error': f'Create failed: {p_resp.status_code} {p_resp.text[:200]}'})
             continue
 
-        # Step 2: Remove from all active sequences so re-enrollment works
-        finish_resp = requests.post('https://api.reply.io/v1/people/finish',
-                                    headers=headers,
-                                    json={'email': email},
-                                    timeout=15)
-        debug_log.append({'step': 'finish', 'email': email,
-                          'status': finish_resp.status_code, 'body': finish_resp.text[:200]})
+        # Get the contact ID from the create response
+        person_data = p_resp.json()
+        contact_id = person_data.get('id')
+        if not contact_id:
+            failed += 1
+            errors.append({'email': email, 'error': 'No contact ID returned from create'})
+            continue
 
-        # Step 3: Enroll directly into correct sequence by ID
-        enroll_payload = {'email': email, 'campaignId': seq_id}
-        e_resp = requests.post('https://api.reply.io/v1/people/campaign',
-                               headers=headers, json=enroll_payload, timeout=15)
-        debug_log.append({'step': 'enroll', 'email': email, 'seq_id': seq_id,
-                          'status': e_resp.status_code, 'body': e_resp.text[:200]})
+        # Step 2: Remove from sequence first using v3 endpoint
+        remove_resp = requests.delete(
+            f'https://api.reply.io/v3/sequences/{seq_id}/contacts/{contact_id}',
+            headers=headers,
+            timeout=15
+        )
+        debug_log.append({'step': 'remove_from_sequence', 'email': email,
+                          'contact_id': contact_id, 'seq_id': seq_id,
+                          'status': remove_resp.status_code, 'body': remove_resp.text[:200]})
 
-        if e_resp.ok:
+        # Step 3: Enroll into correct sequence using v3 endpoint
+        enroll_resp = requests.post(
+            f'https://api.reply.io/v3/sequences/{seq_id}/contacts',
+            headers=headers,
+            json={'contactId': contact_id},
+            timeout=15
+        )
+        debug_log.append({'step': 'enroll', 'email': email,
+                          'contact_id': contact_id, 'seq_id': seq_id,
+                          'status': enroll_resp.status_code, 'body': enroll_resp.text[:200]})
+
+        if enroll_resp.ok:
             enrolled += 1
         else:
-            # Contact created but enrollment failed — still count as partial success
             failed += 1
-            errors.append({'email': email, 'error': f'Enroll failed: {e_resp.status_code} {e_resp.text[:200]}'})
+            errors.append({'email': email, 'error': f'Enroll failed: {enroll_resp.status_code} {enroll_resp.text[:200]}'})
 
     return jsonify({'ok': True, 'enrolled': enrolled, 'failed': failed,
                     'errors': errors, 'debug': debug_log})
