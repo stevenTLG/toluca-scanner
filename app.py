@@ -7,10 +7,8 @@ import requests
 from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 
-app = Flask(__name__, static_folder=None)
+app = Flask(__name__, static_folder='.')
 CORS(app)
-
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 @app.after_request
 def allow_iframe(response):
@@ -34,7 +32,7 @@ def anthropic_headers():
 
 @app.route('/')
 def index():
-    return send_from_directory(APP_DIR, 'index.html')
+    return send_from_directory('.', 'index.html')
 
 @app.route('/api/messages', methods=['POST'])
 def proxy():
@@ -311,11 +309,25 @@ def _run_job(job_id, contacts, criteria):
         JOBS[job_id]['errors'] = errors
         if i < len(contacts) - 1:
             time.sleep(2)
+        # Pause support — wait here until unpaused or cancelled
+        while JOBS.get(job_id, {}).get('paused'):
+            time.sleep(1)
     with JOBS_LOCK:
         JOBS[job_id].update({
             'status': 'done', 'done': True, 'errors': errors,
             'processed': processed, 'current_contact': None, 'finished_at': time.time()
         })
+
+@app.route('/api/pause-job', methods=['POST'])
+def pause_job():
+    data = request.get_json(force=True)
+    job_id = data.get('job_id')
+    paused = data.get('paused', True)
+    with JOBS_LOCK:
+        if job_id not in JOBS:
+            return jsonify({'error': 'Job not found'}), 404
+        JOBS[job_id]['paused'] = paused
+    return jsonify({'ok': True, 'paused': paused})
 
 @app.route('/api/screen-batch', methods=['POST'])
 def screen_batch():
@@ -341,6 +353,7 @@ def screen_batch():
     job_id = str(uuid.uuid4())[:8]
     with JOBS_LOCK:
         JOBS[job_id] = {
+            'paused': False,
             'job_id': job_id, 'batch_id': batch_id, 'status': 'queued',
             'total': to_do, 'total_contacts': len(contacts), 'processed': 0,
             'skipped': already, 'current_contact': None, 'current_index': 0,
@@ -417,25 +430,6 @@ def write_contact():
     return jsonify({'ok': ok, 'error': err})
 
 # ── POST /api/push-replyio ────────────────────────────────────────────────────
-def _get_replyio_sequence_id(headers, name):
-    """Look up a Reply.io sequence ID by name using v3 API."""
-    resp = requests.get('https://api.reply.io/v3/sequences',
-                        headers=headers, timeout=15)
-    if not resp.ok:
-        return None, f'Failed to list sequences: {resp.status_code} {resp.text[:200]}'
-    data = resp.json()
-    items = data.get('items', [])
-    # Exact match first
-    for seq in items:
-        if seq.get('name', '').strip().lower() == name.strip().lower():
-            return seq.get('id'), None
-    # Partial match fallback
-    for seq in items:
-        if name.strip().lower() in seq.get('name', '').strip().lower():
-            return seq.get('id'), None
-    available = [s.get('name') for s in items]
-    return None, f'Sequence "{name}" not found. Available: {available}'
-
 @app.route('/api/push-replyio', methods=['POST'])
 def push_replyio():
     REPLYIO_KEY = os.environ.get('REPLYIO_KEY', '')
@@ -443,226 +437,56 @@ def push_replyio():
         return jsonify({'error': 'REPLYIO_KEY not configured'}), 500
     data = request.get_json(force=True)
     contacts = data.get('contacts', [])
-    personal_seq_name = data.get('personal_sequence_name', 'Personal sequence')
-    standard_seq_name = data.get('standard_sequence_name', 'Standard sequence')
+    personal_seq = data.get('personal_sequence_id')
+    standard_seq = data.get('standard_sequence_id')
     if not contacts:
         return jsonify({'error': 'No contacts'}), 400
 
+    enrolled, failed, errors = 0, 0, []
     headers = {'x-api-key': REPLYIO_KEY, 'Content-Type': 'application/json'}
     debug_log = []
 
-    # Hardcoded fallback IDs (from Reply.io URL)
-    PERSONAL_SEQ_ID_FALLBACK = 1657979
-    STANDARD_SEQ_ID_FALLBACK = 1657982
-
-    # Look up sequence IDs by name
-    personal_seq_id, personal_err = _get_replyio_sequence_id(headers, personal_seq_name)
-    standard_seq_id, standard_err = _get_replyio_sequence_id(headers, standard_seq_name)
-
-    # Fall back to hardcoded IDs if lookup fails
-    if not personal_seq_id:
-        personal_seq_id = PERSONAL_SEQ_ID_FALLBACK
-        personal_err = f'Name lookup failed, using hardcoded ID {PERSONAL_SEQ_ID_FALLBACK}'
-    if not standard_seq_id:
-        standard_seq_id = STANDARD_SEQ_ID_FALLBACK
-        standard_err = f'Name lookup failed, using hardcoded ID {STANDARD_SEQ_ID_FALLBACK}'
-
-    debug_log.append({
-        'step': 'sequence_lookup',
-        'personal': {'name': personal_seq_name, 'id': personal_seq_id, 'error': personal_err},
-        'standard': {'name': standard_seq_name, 'id': standard_seq_id, 'error': standard_err}
-    })
-
-    if not personal_seq_id or not standard_seq_id:
-        return jsonify({
-            'error': f'Could not find sequences even with fallback. Personal: {personal_err}. Standard: {standard_err}',
-            'debug': debug_log
-        }), 400
-
-    enrolled, failed, errors = 0, 0, []
-
     for c in contacts:
         track = c.get('track', 'Standard Sequence')
-        seq_id = personal_seq_id if track == 'Personal Outreach' else standard_seq_id
+        seq_id = personal_seq if track == 'Personal Outreach' else standard_seq
+        if not seq_id:
+            failed += 1
+            errors.append({'email': c.get('email'), 'error': 'No sequence ID'})
+            continue
         email = c.get('email', '')
-        raw_hook = c.get('hook', '') or ''
-        hook = raw_hook.strip() if (track == 'Personal Outreach' and raw_hook.strip()) else '_'
+        hook = c.get('hook', '')
 
-        # Step 1: Create/update contact
+        # Step 1: Create/update contact with hook variable
         person_payload = {
             'email': email,
             'firstName': c.get('firstName', ''),
             'lastName': c.get('lastName', ''),
-            'company': c.get('company', ''),
-            'title': c.get('jobTitle', ''),
-            'customFields': [{'key': 'hook', 'value': hook}]
+            'variables': [{'name': 'hook', 'value': hook}]
         }
         p_resp = requests.post('https://api.reply.io/v1/people',
                                headers=headers, json=person_payload, timeout=15)
-        debug_log.append({'step': 'create_person', 'email': email, 'hook': hook,
-                          'track': track, 'seq_id': seq_id,
+        debug_log.append({'step': 'create_person', 'email': email,
                           'status': p_resp.status_code, 'body': p_resp.text[:200]})
 
-        if not p_resp.ok:
-            failed += 1
-            errors.append({'email': email, 'error': f'Create failed: {p_resp.status_code} {p_resp.text[:200]}'})
-            continue
-
-        # Get the contact ID from the create response
-        person_data = p_resp.json()
-        contact_id = person_data.get('id')
-        if not contact_id:
-            failed += 1
-            errors.append({'email': email, 'error': 'No contact ID returned from create'})
-            continue
-
-        # Step 2: Remove from sequence first using v3 endpoint
-        remove_resp = requests.delete(
-            f'https://api.reply.io/v3/sequences/{seq_id}/contacts/{contact_id}',
-            headers=headers,
-            timeout=15
-        )
-        debug_log.append({'step': 'remove_from_sequence', 'email': email,
-                          'contact_id': contact_id, 'seq_id': seq_id,
-                          'status': remove_resp.status_code, 'body': remove_resp.text[:200]})
-
-        # Step 3: Enroll into correct sequence using v3 endpoint
+        # Step 2: Enroll in sequence via addtocampaign (POST with int campaignId)
         enroll_resp = requests.post(
-            f'https://api.reply.io/v3/sequences/{seq_id}/contacts',
+            f'https://api.reply.io/v1/people/{email}/addtocampaign',
             headers=headers,
-            json={'contactId': contact_id},
+            json={'campaignId': int(seq_id)},
             timeout=15
         )
-        debug_log.append({'step': 'enroll', 'email': email,
-                          'contact_id': contact_id, 'seq_id': seq_id,
-                          'status': enroll_resp.status_code, 'body': enroll_resp.text[:200]})
+        debug_log.append({'step': 'enroll', 'email': email, 'seq_id': seq_id,
+                          'status': enroll_resp.status_code, 'body': enroll_resp.text[:300]})
 
         if enroll_resp.ok:
             enrolled += 1
         else:
             failed += 1
-            errors.append({'email': email, 'error': f'Enroll failed: {enroll_resp.status_code} {enroll_resp.text[:200]}'})
+            errors.append({'email': email, 'status': enroll_resp.status_code,
+                           'body': enroll_resp.text[:300]})
 
     return jsonify({'ok': True, 'enrolled': enrolled, 'failed': failed,
                     'errors': errors, 'debug': debug_log})
-@app.route('/api/rollback-replyio', methods=['POST'])
-def rollback_replyio():
-    REPLYIO_KEY = os.environ.get('REPLYIO_KEY', '')
-    if not REPLYIO_KEY:
-        return jsonify({'error': 'REPLYIO_KEY not configured'}), 500
-    if not HUBSPOT_TOKEN:
-        return jsonify({'error': 'HUBSPOT_TOKEN not configured'}), 500
-    data = request.get_json(force=True)
-    batch_id = data.get('batch_id', '').strip()
-    emails = data.get('emails', [])  # optional: pass emails directly instead of batch_id
-
-    # If no emails passed directly, look them up from HubSpot batch
-    if not emails:
-        if not batch_id:
-            return jsonify({'error': 'batch_id or emails required'}), 400
-        after = None
-        while True:
-            payload = {
-                'filterGroups': [{'filters': [{'propertyName': 'grata_batch', 'operator': 'EQ', 'value': batch_id}]}],
-                'properties': ['email'], 'limit': 100
-            }
-            if after:
-                payload['after'] = after
-            resp = requests.post(f'{HUBSPOT_BASE}/crm/v3/objects/contacts/search',
-                                 headers=hs_headers(), json=payload, timeout=30)
-            if not resp.ok:
-                return jsonify({'error': f'HubSpot fetch failed: {resp.status_code}'}), 500
-            d = resp.json()
-            for c in d.get('results', []):
-                em = c.get('properties', {}).get('email', '')
-                if em:
-                    emails.append(em)
-            nxt = d.get('paging', {}).get('next', {}).get('after')
-            if nxt:
-                after = nxt
-            else:
-                break
-
-    headers = {'x-api-key': REPLYIO_KEY, 'Content-Type': 'application/json'}
-    deleted, failed, errors = 0, 0, []
-    debug_log = []
-
-    for email in emails:
-        if not email:
-            continue
-        entry = {'email': email, 'steps': []}
-
-        # Step 1: DELETE /v1/people with email in body
-        del_resp = requests.delete(
-            'https://api.reply.io/v1/people',
-            headers=headers,
-            json={'email': email},
-            timeout=15
-        )
-        entry['steps'].append({
-            'step': 'delete_by_email_body',
-            'status': del_resp.status_code,
-            'body': del_resp.text[:300]
-        })
-
-        if del_resp.ok or del_resp.status_code == 404:
-            deleted += 1
-            entry['result'] = 'deleted'
-        else:
-            # Fallback: GET all people, find by email, delete by ID
-            search_resp = requests.get(
-                'https://api.reply.io/v1/people',
-                headers=headers,
-                params={'page': 1, 'pageSize': 100},
-                timeout=15
-            )
-            entry['steps'].append({
-                'step': 'get_all_people',
-                'status': search_resp.status_code,
-                'body': search_resp.text[:500]
-            })
-
-            person_id = None
-            if search_resp.ok:
-                data = search_resp.json()
-                people = data if isinstance(data, list) else data.get('people', [])
-                entry['steps'].append({'step': 'people_count', 'count': len(people),
-                                       'emails_found': [p.get('email') for p in people[:10]]})
-                for p in people:
-                    if (p.get('email') or '').lower() == email.lower():
-                        person_id = p.get('id')
-                        break
-
-            if person_id:
-                del2 = requests.delete(
-                    f'https://api.reply.io/v1/people/{person_id}',
-                    headers=headers,
-                    timeout=15
-                )
-                entry['steps'].append({
-                    'step': 'delete_by_id',
-                    'person_id': person_id,
-                    'status': del2.status_code,
-                    'body': del2.text[:300]
-                })
-                if del2.ok or del2.status_code == 404:
-                    deleted += 1
-                    entry['result'] = 'deleted_by_id'
-                else:
-                    failed += 1
-                    entry['result'] = 'failed'
-                    errors.append({'email': email, 'error': f'Delete by ID failed: {del2.status_code} {del2.text[:200]}'})
-            else:
-                failed += 1
-                entry['result'] = 'not_found'
-                errors.append({'email': email, 'error': f'Not found in Reply.io (step1 status: {del_resp.status_code})'})
-
-        debug_log.append(entry)
-        time.sleep(0.3)
-
-    return jsonify({'ok': True, 'deleted': deleted, 'failed': failed,
-                    'total': len(emails), 'errors': errors, 'debug': debug_log})
-
 
 @app.route('/api/rollback', methods=['POST'])
 def rollback():
