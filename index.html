@@ -244,7 +244,7 @@
     <button class="btn btn-secondary" id="btnStop" style="display:none" onclick="stopProcessing()">Pause</button>
     <button class="btn btn-secondary" onclick="showApiKeyModal('Enter or update your Anthropic API key.')" style="font-size:11px;padding:10px 14px" title="Set API Key" id="btn-api-key">🔑 API Key</button>
     <button class="btn btn-primary" id="btnRun" onclick="startServerScreening()">▶ Run Screener</button>
-    <button class="btn" id="btnPause" onclick="togglePauseScreening()" style="display:none;margin-left:8px;background:rgba(201,168,76,0.15);color:var(--amber);border:1px solid rgba(201,168,76,0.3)">⏸ Pause</button>
+    <button class="btn" id="btnPause" onclick="togglePauseScreening()" style="display:none;background:rgba(201,168,76,0.15);color:var(--amber);border:1px solid rgba(201,168,76,0.3)">⏸ Pause</button>
   </div>
 
   <div class="stats">
@@ -389,6 +389,36 @@ let profileCache = { ...PROFILE_DEFAULTS };
 // ─── SERVER-SIDE SCREENING ───────────────────────────────────────────────────
 let activeJobId   = null;
 let pollInterval  = null;
+let isPaused      = false;
+
+function _showPauseBtn() {
+  const btn = document.getElementById('btnPause');
+  if (btn) { btn.style.display = 'inline-block'; btn.textContent = '⏸ Pause'; btn.style.background = 'rgba(201,168,76,0.15)'; btn.style.color = 'var(--amber)'; btn.style.borderColor = 'rgba(201,168,76,0.3)'; }
+}
+function _hidePauseBtn() {
+  const btn = document.getElementById('btnPause');
+  if (btn) { btn.style.display = 'none'; isPaused = false; }
+}
+
+async function togglePauseScreening() {
+  if (!activeJobId) return;
+  isPaused = !isPaused;
+  const btn = document.getElementById('btnPause');
+  if (btn) {
+    btn.textContent = isPaused ? '▶ Resume' : '⏸ Pause';
+    btn.style.background = isPaused ? 'rgba(92,232,92,0.15)' : 'rgba(201,168,76,0.15)';
+    btn.style.color = isPaused ? '#5ce85c' : 'var(--amber)';
+    btn.style.borderColor = isPaused ? 'rgba(92,232,92,0.3)' : 'rgba(201,168,76,0.3)';
+  }
+  document.getElementById('server-progress-contact').textContent = isPaused ? '⏸ Paused — will finish current contact then wait' : '→ Resuming...';
+  try {
+    await fetch('/api/pause-job', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_id: activeJobId, paused: isPaused })
+    });
+  } catch(e) {}
+}
 
 function buildCriteriaPayload() {
   // Collect current criteria to send to the server
@@ -462,8 +492,7 @@ async function startServerScreening() {
       `${data.already_screened} already screened — ${data.total} to process`;
 
     isPaused = false;
-    const pauseBtn = document.getElementById('btnPause');
-    if (pauseBtn) { pauseBtn.style.display = 'inline-block'; pauseBtn.textContent = '⏸ Pause'; }
+    _showPauseBtn();
     startPolling();
   } catch(e) {
     btn.disabled = false;
@@ -480,25 +509,6 @@ function startPolling() {
 
 function stopPolling() {
   if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-}
-
-let isPaused = false;
-async function togglePauseScreening() {
-  if (!activeJobId) return;
-  isPaused = !isPaused;
-  const btn = document.getElementById('btnPause');
-  btn.textContent = isPaused ? '▶ Resume' : '⏸ Pause';
-  btn.style.background = isPaused ? 'rgba(92,232,92,0.15)' : 'rgba(201,168,76,0.15)';
-  btn.style.color = isPaused ? '#5ce85c' : 'var(--amber)';
-  btn.style.borderColor = isPaused ? 'rgba(92,232,92,0.3)' : 'rgba(201,168,76,0.3)';
-  document.getElementById('server-progress-contact').textContent = isPaused ? '⏸ Paused — will finish current contact then wait' : '→ Resuming...';
-  try {
-    await fetch('/api/pause-job', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ job_id: activeJobId, paused: isPaused })
-    });
-  } catch(e) {}
 }
 
 async function pollJobStatus() {
@@ -555,9 +565,7 @@ async function onScreeningComplete(job) {
   const btn = document.getElementById('btnRun');
   btn.disabled = false;
   btn.textContent = '▶ Run Screener';
-  isPaused = false;
-  const pauseBtn = document.getElementById('btnPause');
-  if (pauseBtn) pauseBtn.style.display = 'none';
+  _hidePauseBtn();
 
   document.getElementById('server-progress-contact').textContent = '';
   document.getElementById('server-progress-eta').textContent = '✓ Complete';
@@ -620,6 +628,8 @@ async function reconnectJob() {
     btn.textContent = '⏳ Screening...';
     document.getElementById('server-progress').style.display = 'block';
     document.getElementById('controlDesc').textContent = 'Reconnected to running screening job — you can close this tab.';
+    isPaused = false;
+    _showPauseBtn();
     updateProgressUI(job);
     startPolling();
   } catch(e) {}
@@ -1138,6 +1148,16 @@ function showBatchControls(batchId) {
     <span style="font-size:12px;color:var(--gold);font-weight:600;letter-spacing:0.5px">${batchId}</span>
     <span style="font-size:11px;color:var(--text-muted)">${allContacts.length} contacts</span>
     <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <span style="font-size:10px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">Personal ID</span>
+      <input id="inline-personal-seq" type="text" placeholder="e.g. 1657027"
+        style="width:90px;padding:5px 8px;background:var(--dark-3);color:var(--gold);border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace"
+        oninput="saveInlineSeqIds()" />
+      <span style="font-size:10px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">Standard ID</span>
+      <input id="inline-standard-seq" type="text" placeholder="e.g. 1657041"
+        style="width:90px;padding:5px 8px;background:var(--dark-3);color:var(--gold);border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace"
+        oninput="saveInlineSeqIds()" />
+    </div>
     <button class="btn btn-secondary" onclick="writeResultsToHubSpot()" style="font-size:12px;padding:8px 16px" id="btn-write-hs">
       ↑ Write to HubSpot
     </button>
@@ -1148,6 +1168,21 @@ function showBatchControls(batchId) {
       → Push to Reply.io
     </button>
   `;
+  // Populate inline fields from saved storage
+  window.storage.get('replyio_sequences').then(data => {
+    if (data && data.value) {
+      const seqs = JSON.parse(data.value);
+      const pEl = document.getElementById('inline-personal-seq');
+      const sEl = document.getElementById('inline-standard-seq');
+      if (pEl) pEl.value = seqs.personal || '';
+      if (sEl) sEl.value = seqs.standard || '';
+      // Also sync to criteria page fields if open
+      const cpEl = document.getElementById('replyio-personal-seq');
+      const csEl = document.getElementById('replyio-standard-seq');
+      if (cpEl) cpEl.value = seqs.personal || '';
+      if (csEl) csEl.value = seqs.standard || '';
+    }
+  }).catch(()=>{});
   toolbar.parentNode.insertBefore(bar, toolbar);
 }
 
@@ -1253,28 +1288,20 @@ async function writeResultsToHubSpot() {
   }
 }
 
+async function saveInlineSeqIds() {
+  const pEl = document.getElementById('inline-personal-seq');
+  const sEl = document.getElementById('inline-standard-seq');
+  if (!pEl || !sEl) return;
+  try {
+    await window.storage.set('replyio_sequences', JSON.stringify({
+      personal: pEl.value.trim(),
+      standard: sEl.value.trim()
+    }));
+  } catch(e) {}
+}
+
 async function pushToReplyIo() {
   const btn = document.getElementById('btn-push-reply');
-
-  // Load stored sequence IDs
-  let personalSeqId = '', standardSeqId = '';
-  try {
-    const seqData = await window.storage.get('replyio_sequences').catch(()=>null);
-    if (seqData && seqData.value) {
-      const seqs = JSON.parse(seqData.value);
-      personalSeqId = seqs.personal || '';
-      standardSeqId = seqs.standard || '';
-    }
-  } catch(e) {}
-
-  // Fall back to prompt if not configured
-  if (!personalSeqId || !standardSeqId) {
-    const msg = 'Reply.io sequence IDs not configured.\n\nGo to Criteria & Weights tab → Reply.io Sequences → enter your IDs and Save All.\n\nEnter Personal Outreach sequence ID now (or cancel):';
-    personalSeqId = prompt(msg);
-    if (!personalSeqId) return;
-    standardSeqId = prompt('Standard Sequence sequence ID:');
-    if (!standardSeqId) return;
-  }
 
   const contacts = allContacts
     .map((c, i) => {
@@ -1285,13 +1312,25 @@ async function pushToReplyIo() {
         email:     c.email,
         firstName: c.firstName,
         lastName:  c.lastName,
+        company:   c.company  || '',
+        jobTitle:  c.jobTitle || '',
         track,
         hook: hookEdits[i] !== undefined ? hookEdits[i] : (r.hook || '')
       };
     })
     .filter(Boolean);
 
-  if (!contacts.length) { alert('No screened contacts with emails to push.'); return; }
+  if (!contacts.length) { await showAlert('No screened contacts with emails to push.'); return; }
+
+  const personal = contacts.filter(c => c.track === 'Personal Outreach').length;
+  const standard = contacts.filter(c => c.track === 'Standard Sequence').length;
+  const ok = await showConfirm(
+    'Push to Reply.io',
+    `Push ${contacts.length} contacts? ${personal} Personal Outreach, ${standard} Standard Sequence.`,
+    'Push', 'Cancel'
+  );
+  if (!ok) return;
+
   btn.textContent = 'Pushing...'; btn.disabled = true;
 
   try {
@@ -1300,16 +1339,26 @@ async function pushToReplyIo() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contacts,
-        personal_sequence_id: parseInt(personalSeqId),
-        standard_sequence_id: parseInt(standardSeqId)
+        personal_sequence_name: 'Personal sequence',
+        standard_sequence_name: 'Standard sequence'
       })
     });
     const data = await resp.json();
+
+    // Log debug info to console for troubleshooting
+    if (data.debug) console.log('[Push Debug]', JSON.stringify(data.debug, null, 2));
+
     if (data.ok) {
       btn.textContent = `✓ ${data.enrolled} enrolled`;
       btn.style.background = 'rgba(76,175,125,0.15)';
       btn.style.color = 'var(--green)';
       btn.style.borderColor = 'rgba(76,175,125,0.3)';
+
+      if (data.failed > 0) {
+        console.warn('[Push] Failed:', data.errors);
+        await showAlert(`${data.enrolled} enrolled, ${data.failed} failed. Check browser console for details.`);
+      }
+
       // Mark each pushed contact's row with Pushed badge
       allContacts.forEach((c, i) => {
         const r = results[i];
@@ -1323,13 +1372,11 @@ async function pushToReplyIo() {
       // Mark batch as pushed in storage
       if (BATCH_ID) {
         try {
-          const p = contacts.filter(c => c.track === 'Personal Outreach').length;
-          const s = contacts.filter(c => c.track === 'Standard Sequence').length;
           await window.storage.set('screener_status_' + BATCH_ID, JSON.stringify({
-            status: 'pushed', enrolled: data.enrolled, personal: p, standard: s,
+            status: 'pushed', enrolled: data.enrolled, personal, standard,
             timestamp: new Date().toISOString()
           }));
-          await updateBatchHistoryStatus(BATCH_ID, contacts.length, p, s, true);
+          await updateBatchHistoryStatus(BATCH_ID, contacts.length, personal, standard, true);
         } catch(e) {}
       }
       setTimeout(() => {
@@ -1340,12 +1387,15 @@ async function pushToReplyIo() {
         btn.disabled = false;
       }, 4000);
     } else {
-      btn.textContent = `⚠ ${data.failed} failed`;
+      const errMsg = data.error || `${data.failed} failed`;
+      btn.textContent = `⚠ Error`;
       btn.disabled = false;
+      await showAlert('Push failed: ' + errMsg + '\n\nCheck browser console for debug details.');
     }
   } catch(e) {
     btn.textContent = 'Error'; btn.disabled = false;
     console.error(e);
+    await showAlert('Network error: ' + e.message);
   }
 }
 let results = {};
@@ -1473,10 +1523,11 @@ if (BATCH_ID) {
     }
   } catch(e) {}
 
-  // Recount
+  // Recount — only count contacts in the current batch
+  const currentContactIds = new Set(allContacts.map(c => c.id));
   personalCount = 0; standardCount = 0; processedCount = 0;
-  Object.values(results).forEach(r => {
-    if (r && r.status === 'done') {
+  Object.entries(results).forEach(([id, r]) => {
+    if (r && r.status === 'done' && currentContactIds.has(id)) {
       processedCount++;
       if (r.track === 'Personal Outreach') personalCount++;
       else standardCount++;
@@ -1484,7 +1535,7 @@ if (BATCH_ID) {
   });
   updateStats();
   renderTable();
-  const remaining = allContacts.length - processedCount;
+  const remaining = Math.max(0, allContacts.length - processedCount);
   DOM['controlTitle'].textContent = remaining === 0 ? `Complete  -  All ${allContacts.length} Contacts Screened` : processedCount > 0 ? `${processedCount} Screened · ${remaining} Remaining` : `Ready to Screen ${allContacts.length} Contacts`;
   DOM['controlDesc'].textContent = processedCount > 0 ? `${personalCount} Personal Outreach · ${standardCount} Standard Sequence` : 'Click Run Screener to analyze all contacts';
 })();
@@ -2217,38 +2268,38 @@ function closeModal() {
 }
 async function confirmOverride() {
   if (modalIndex === null) return;
-  overrides[modalIndex] = true;
+  const savedModalIndex = modalIndex;
+  overrides[savedModalIndex] = 'personal';
   const noteVal = document.getElementById('modalNotes').value.trim();
-  if (noteVal) notes[modalIndex] = noteVal;
+  if (noteVal) notes[savedModalIndex] = noteVal;
   // Store override note on the result so it gets written to HubSpot
-  if (results[modalIndex]) {
-    results[modalIndex]._override_note = noteVal;
+  if (results[savedModalIndex]) {
+    results[savedModalIndex]._override_note = noteVal;
   }
   closeModal();
-  renderRow(modalIndex);
+  renderRow(savedModalIndex);
   await saveOverrides();
   await saveNotes();
   // Auto-save override to HubSpot immediately
-  const c = allContacts[modalIndex];
-  const r = results[modalIndex];
+  const c = allContacts[savedModalIndex];
+  const r = results[savedModalIndex];
   if (c && c.hubspot_id && r) {
     autoSaveToHubSpot(c.hubspot_id, {
-      track:         overrides[modalIndex] ? (overrides[modalIndex] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track,
+      track:         'Personal Outreach',
       score:         r.score,
-      hook:          hookEdits[modalIndex] !== undefined ? hookEdits[modalIndex] : (r.hook || ''),
+      hook:          hookEdits[savedModalIndex] !== undefined ? hookEdits[savedModalIndex] : (r.hook || ''),
       recommendation: r.recommendation || '',
       track_reason:  r.track_reason || '',
       connections:   r.connections || [],
       override:      true,
       override_note: noteVal,
-      notes:         notes[modalIndex] || ''
+      notes:         notes[savedModalIndex] || ''
     });
   }
   // Generate hook if none exists for this forced-personal contact
-  const savedIdx = modalIndex;
-  const currentHook = hookEdits[savedIdx] !== undefined ? hookEdits[savedIdx] : (r && r.hook) || '';
+  const currentHook = hookEdits[savedModalIndex] !== undefined ? hookEdits[savedModalIndex] : (r && r.hook) || '';
   if (!currentHook.trim()) {
-    generateHookForIndex(savedIdx);
+    generateHookForIndex(savedModalIndex);
   }
 }
 
@@ -3421,6 +3472,17 @@ function renderCriteriaPage() {
 
   // Feedback list
   renderFeedbackList();
+
+  // Populate Reply.io sequence ID fields from storage
+  window.storage.get('replyio_sequences').then(data => {
+    if (data && data.value) {
+      const seqs = JSON.parse(data.value);
+      const pEl = document.getElementById('replyio-personal-seq');
+      const sEl = document.getElementById('replyio-standard-seq');
+      if (pEl && !pEl.value) pEl.value = seqs.personal || '';
+      if (sEl && !sEl.value) sEl.value = seqs.standard || '';
+    }
+  }).catch(()=>{});
 }
 
 function setWeight(id, w) {
