@@ -132,6 +132,9 @@ def _fetch_contacts(batch_id, full=False):
                 'existing_override_note': p.get('scanner_override_note', ''),
                 'existing_notes': p.get('scanner_notes', ''),
             })
+        # Skip contacts with no email — they can't be screened or pushed to Reply.io
+        if not entry['email']:
+            continue
         contacts.append(entry)
     return contacts
 
@@ -522,10 +525,10 @@ def test_replyio():
     if not contact_id:
         return jsonify({'ok': False, 'error': 'Could not get contact ID', 'log': log})
 
-    # Step 5: enroll via v1 addtocampaign
+    # Step 5: enroll via v1 addtocampaign (email in body, not URL)
     enroll_resp = requests.post(
-        f'https://api.reply.io/v1/people/{email}/addtocampaign',
-        headers=headers, json={'campaignId': int(seq_id)}, timeout=15)
+        'https://api.reply.io/v1/people/addtocampaign',
+        headers=headers, json={'email': email, 'campaignId': int(seq_id)}, timeout=15)
     log.append({'step': 'enroll', 'seq_id': seq_id, 'contact_id': contact_id,
                 'status': enroll_resp.status_code, 'body': enroll_resp.text[:500]})
 
@@ -636,20 +639,21 @@ def push_replyio():
             errors.append({'email': email, 'error': f'Could not get contact ID after create and lookup. Create response: {p_resp.text[:200]}'})
             continue
 
-        # Step 2: Remove from any existing campaign first so we can re-enroll
-        # v1 endpoint: DELETE /v1/people/{email}/deletefrompushcampaigns
+        # Step 2: Remove from any existing campaign (email in body, not URL)
         remove_resp = requests.delete(
-            f'https://api.reply.io/v1/people/{email}/deletefrompushcampaigns',
-            headers=headers, timeout=15
+            'https://api.reply.io/v1/people/deletefrompushcampaigns',
+            headers=headers,
+            json={'email': email},
+            timeout=15
         )
         debug_log.append({'step': 'remove_from_campaign', 'email': email,
                           'status': remove_resp.status_code, 'body': remove_resp.text[:200]})
 
-        # Step 3: Enroll via v1 addtocampaign
+        # Step 3: Enroll in sequence (email in body, not URL)
         enroll_resp = requests.post(
-            f'https://api.reply.io/v1/people/{email}/addtocampaign',
+            'https://api.reply.io/v1/people/addtocampaign',
             headers=headers,
-            json={'campaignId': int(seq_id)},
+            json={'email': email, 'campaignId': int(seq_id)},
             timeout=15
         )
         debug_log.append({'step': 'enroll', 'email': email,
