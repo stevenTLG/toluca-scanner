@@ -469,6 +469,18 @@ async function startServerScreening() {
     });
     const data = await resp.json();
 
+    // 409 = job already running for this batch — reconnect to it instead of erroring
+    if (resp.status === 409 && data.job_id) {
+      console.log('[Screener] 409 — reconnecting to existing job', data.job_id);
+      activeJobId = data.job_id;
+      btn.textContent = '⏳ Screening...';
+      document.getElementById('server-progress-label').textContent = 'Reconnecting to running job...';
+      isPaused = false;
+      _showPauseBtn();
+      startPolling();
+      return;
+    }
+
     if (!resp.ok || data.error) {
       btn.disabled = false;
       btn.textContent = '▶ Run Screener';
