@@ -522,10 +522,10 @@ def test_replyio():
     if not contact_id:
         return jsonify({'ok': False, 'error': 'Could not get contact ID', 'log': log})
 
-    # Step 5: enroll
+    # Step 5: enroll via v1 addtocampaign
     enroll_resp = requests.post(
-        f'https://api.reply.io/v3/sequences/{seq_id}/contacts',
-        headers=headers, json={'contactId': contact_id}, timeout=15)
+        f'https://api.reply.io/v1/people/{email}/addtocampaign',
+        headers=headers, json={'campaignId': int(seq_id)}, timeout=15)
     log.append({'step': 'enroll', 'seq_id': seq_id, 'contact_id': contact_id,
                 'status': enroll_resp.status_code, 'body': enroll_resp.text[:500]})
 
@@ -636,28 +636,27 @@ def push_replyio():
             errors.append({'email': email, 'error': f'Could not get contact ID after create and lookup. Create response: {p_resp.text[:200]}'})
             continue
 
-        # Step 2: Remove from sequence first using v3 endpoint
+        # Step 2: Remove from any existing campaign first so we can re-enroll
+        # v1 endpoint: DELETE /v1/people/{email}/deletefrompushcampaigns
         remove_resp = requests.delete(
-            f'https://api.reply.io/v3/sequences/{seq_id}/contacts/{contact_id}',
-            headers=headers,
-            timeout=15
+            f'https://api.reply.io/v1/people/{email}/deletefrompushcampaigns',
+            headers=headers, timeout=15
         )
-        debug_log.append({'step': 'remove_from_sequence', 'email': email,
-                          'contact_id': contact_id, 'seq_id': seq_id,
+        debug_log.append({'step': 'remove_from_campaign', 'email': email,
                           'status': remove_resp.status_code, 'body': remove_resp.text[:200]})
 
-        # Step 3: Enroll into correct sequence using v3 endpoint
+        # Step 3: Enroll via v1 addtocampaign
         enroll_resp = requests.post(
-            f'https://api.reply.io/v3/sequences/{seq_id}/contacts',
+            f'https://api.reply.io/v1/people/{email}/addtocampaign',
             headers=headers,
-            json={'contactId': contact_id},
+            json={'campaignId': int(seq_id)},
             timeout=15
         )
         debug_log.append({'step': 'enroll', 'email': email,
                           'contact_id': contact_id, 'seq_id': seq_id,
-                          'status': enroll_resp.status_code, 'body': enroll_resp.text[:200]})
+                          'status': enroll_resp.status_code, 'body': enroll_resp.text[:300]})
 
-        if enroll_resp.ok:
+        if enroll_resp.ok or enroll_resp.status_code == 200:
             enrolled += 1
         else:
             failed += 1
