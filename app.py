@@ -5,7 +5,7 @@ import uuid
 import threading
 import requests
 from flask import Flask, request, jsonify, send_from_directory, Response
-from flask_cors import CORS 
+from flask_cors import CORS
 
 app = Flask(__name__, static_folder=None)
 CORS(app)
@@ -343,8 +343,21 @@ def screen_batch():
     if not batch_id:
         return jsonify({'error': 'batch_id required'}), 400
     with JOBS_LOCK:
-        for jid, job in JOBS.items():
+        for jid, job in list(JOBS.items()):
             if job.get('batch_id') == batch_id and not job.get('done'):
+                # Check if job is stale — no progress in last 10 minutes
+                started = job.get('started_at', 0)
+                age = time.time() - started
+                processed = job.get('processed', 0)
+                total = job.get('total', 1)
+                # Stale if: running >10min AND processed 0, OR running >30min total
+                is_stale = (age > 600 and processed == 0) or (age > 1800)
+                if is_stale:
+                    # Mark dead and allow new job
+                    JOBS[jid]['done'] = True
+                    JOBS[jid]['status'] = 'stale'
+                    print(f'[screen-batch] Marked stale job {jid} as done (age={age:.0f}s, processed={processed})')
+                    continue
                 return jsonify({'error': 'Job already running', 'job_id': jid}), 409
     try:
         contacts = _fetch_contacts(batch_id, full=False)
@@ -451,6 +464,74 @@ def _get_replyio_sequence_id(headers, name):
     available = [s.get('name') for s in items]
     return None, f'Sequence "{name}" not found. Available: {available}'
 
+@app.route('/api/test-replyio', methods=['POST'])
+def test_replyio():
+    """Debug endpoint — sends ONE contact through the full push flow and returns every raw response."""
+    REPLYIO_KEY = os.environ.get('REPLYIO_KEY', '')
+    if not REPLYIO_KEY:
+        return jsonify({'error': 'REPLYIO_KEY not configured'}), 500
+    data = request.get_json(force=True)
+    email = data.get('email', '')
+    first = data.get('firstName', 'Test')
+    last = data.get('lastName', 'User')
+    seq_id = data.get('seq_id', 1657982)  # default to standard
+    hook = data.get('hook', '_')
+    if not email:
+        return jsonify({'error': 'email required'}), 400
+
+    headers = {'x-api-key': REPLYIO_KEY, 'Content-Type': 'application/json'}
+    log = []
+
+    # Step 1: list sequences
+    seq_resp = requests.get('https://api.reply.io/v3/sequences', headers=headers, timeout=15)
+    log.append({'step': 'list_sequences', 'status': seq_resp.status_code, 'body': seq_resp.text[:500]})
+
+    # Step 2: create contact
+    person_payload = {'email': email, 'firstName': first, 'lastName': last,
+                      'customFields': [{'key': 'hook', 'value': hook}]}
+    p_resp = requests.post('https://api.reply.io/v1/people', headers=headers, json=person_payload, timeout=15)
+    log.append({'step': 'create_person', 'payload': person_payload,
+                'status': p_resp.status_code, 'body': p_resp.text[:500],
+                'headers': dict(p_resp.headers)})
+
+    # Step 3: parse contact ID
+    try:
+        person_data = p_resp.json() if p_resp.text else {}
+    except Exception:
+        person_data = {}
+    contact_id = (person_data.get('id') or
+                  person_data.get('personId') or
+                  (person_data.get('data', {}) or {}).get('id'))
+    log.append({'step': 'parse_id', 'person_data': person_data, 'contact_id': contact_id})
+
+    # Step 4: lookup by email if no ID
+    if not contact_id:
+        lookup = requests.get('https://api.reply.io/v1/people', headers=headers,
+                              params={'email': email}, timeout=15)
+        log.append({'step': 'lookup_by_email', 'status': lookup.status_code, 'body': lookup.text[:500]})
+        try:
+            ld = lookup.json()
+            if isinstance(ld, list) and ld:
+                contact_id = ld[0].get('id')
+            elif isinstance(ld, dict):
+                contact_id = ld.get('id') or ld.get('personId')
+        except Exception:
+            pass
+        log.append({'step': 'id_after_lookup', 'contact_id': contact_id})
+
+    if not contact_id:
+        return jsonify({'ok': False, 'error': 'Could not get contact ID', 'log': log})
+
+    # Step 5: enroll
+    enroll_resp = requests.post(
+        f'https://api.reply.io/v3/sequences/{seq_id}/contacts',
+        headers=headers, json={'contactId': contact_id}, timeout=15)
+    log.append({'step': 'enroll', 'seq_id': seq_id, 'contact_id': contact_id,
+                'status': enroll_resp.status_code, 'body': enroll_resp.text[:500]})
+
+    return jsonify({'ok': enroll_resp.ok, 'contact_id': contact_id,
+                    'enrolled': enroll_resp.ok, 'log': log})
+
 @app.route('/api/push-replyio', methods=['POST'])
 def push_replyio():
     REPLYIO_KEY = os.environ.get('REPLYIO_KEY', '')
@@ -524,11 +605,35 @@ def push_replyio():
             continue
 
         # Get the contact ID from the create response
-        person_data = p_resp.json()
-        contact_id = person_data.get('id')
+        # Reply.io returns different shapes for new vs existing contacts
+        person_data = p_resp.json() if p_resp.text else {}
+        contact_id = (
+            person_data.get('id') or
+            person_data.get('personId') or
+            person_data.get('data', {}).get('id') if isinstance(person_data.get('data'), dict) else None
+        )
+
+        # If still no ID, contact likely already exists — look it up by email
+        if not contact_id:
+            lookup_resp = requests.get(
+                'https://api.reply.io/v1/people',
+                headers=headers,
+                params={'email': email},
+                timeout=15
+            )
+            debug_log.append({'step': 'lookup_by_email', 'email': email,
+                              'status': lookup_resp.status_code, 'body': lookup_resp.text[:300]})
+            if lookup_resp.ok:
+                lookup_data = lookup_resp.json()
+                # Response may be a single object or a list
+                if isinstance(lookup_data, list) and lookup_data:
+                    contact_id = lookup_data[0].get('id')
+                elif isinstance(lookup_data, dict):
+                    contact_id = lookup_data.get('id') or lookup_data.get('personId')
+
         if not contact_id:
             failed += 1
-            errors.append({'email': email, 'error': 'No contact ID returned from create'})
+            errors.append({'email': email, 'error': f'Could not get contact ID after create and lookup. Create response: {p_resp.text[:200]}'})
             continue
 
         # Step 2: Remove from sequence first using v3 endpoint
@@ -558,8 +663,11 @@ def push_replyio():
             failed += 1
             errors.append({'email': email, 'error': f'Enroll failed: {enroll_resp.status_code} {enroll_resp.text[:200]}'})
 
+        time.sleep(0.5)  # avoid Reply.io rate limiting
+
     return jsonify({'ok': True, 'enrolled': enrolled, 'failed': failed,
                     'errors': errors, 'debug': debug_log})
+
 @app.route('/api/rollback-replyio', methods=['POST'])
 def rollback_replyio():
     REPLYIO_KEY = os.environ.get('REPLYIO_KEY', '')
