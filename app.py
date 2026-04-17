@@ -547,126 +547,101 @@ def push_replyio():
     if not contacts:
         return jsonify({'error': 'No contacts'}), 400
 
-    headers = {'x-api-key': REPLYIO_KEY, 'Content-Type': 'application/json'}
+    headers = {'x-api-key': REPLYIO_KEY}
     debug_log = []
 
-    # Hardcoded fallback IDs (from Reply.io URL)
     PERSONAL_SEQ_ID_FALLBACK = 1657979
     STANDARD_SEQ_ID_FALLBACK = 1657982
 
     # Look up sequence IDs by name
-    personal_seq_id, personal_err = _get_replyio_sequence_id(headers, personal_seq_name)
-    standard_seq_id, standard_err = _get_replyio_sequence_id(headers, standard_seq_name)
+    json_headers = {**headers, 'Content-Type': 'application/json'}
+    personal_seq_id, personal_err = _get_replyio_sequence_id(json_headers, personal_seq_name)
+    standard_seq_id, standard_err = _get_replyio_sequence_id(json_headers, standard_seq_name)
 
-    # Fall back to hardcoded IDs if lookup fails
     if not personal_seq_id:
         personal_seq_id = PERSONAL_SEQ_ID_FALLBACK
-        personal_err = f'Name lookup failed, using hardcoded ID {PERSONAL_SEQ_ID_FALLBACK}'
     if not standard_seq_id:
         standard_seq_id = STANDARD_SEQ_ID_FALLBACK
-        standard_err = f'Name lookup failed, using hardcoded ID {STANDARD_SEQ_ID_FALLBACK}'
 
     debug_log.append({
         'step': 'sequence_lookup',
-        'personal': {'name': personal_seq_name, 'id': personal_seq_id, 'error': personal_err},
-        'standard': {'name': standard_seq_name, 'id': standard_seq_id, 'error': standard_err}
+        'personal': {'id': personal_seq_id, 'error': personal_err},
+        'standard': {'id': standard_seq_id, 'error': standard_err}
     })
 
-    if not personal_seq_id or not standard_seq_id:
-        return jsonify({
-            'error': f'Could not find sequences even with fallback. Personal: {personal_err}. Standard: {standard_err}',
-            'debug': debug_log
-        }), 400
+    # Split contacts into personal and standard groups
+    personal_contacts = [c for c in contacts if c.get('track') == 'Personal Outreach']
+    standard_contacts = [c for c in contacts if c.get('track') != 'Personal Outreach']
 
     enrolled, failed, errors = 0, 0, []
 
-    for c in contacts:
-        track = c.get('track', 'Standard Sequence')
-        seq_id = personal_seq_id if track == 'Personal Outreach' else standard_seq_id
-        email = c.get('email', '')
-        raw_hook = c.get('hook', '') or ''
-        hook = raw_hook.strip() if (track == 'Personal Outreach' and raw_hook.strip()) else '_'
+    def push_group(group, seq_id):
+        nonlocal enrolled, failed
+        if not group:
+            return
 
-        # Step 1: Create/update contact
-        person_payload = {
-            'email': email,
-            'firstName': c.get('firstName', ''),
-            'lastName': c.get('lastName', ''),
-            'company': c.get('company', ''),
-            'title': c.get('jobTitle', ''),
-            'customFields': [{'key': 'hook', 'value': hook}]
+        # Build CSV in memory
+        import io, csv as csv_mod
+        buf = io.StringIO()
+        writer = csv_mod.writer(buf)
+        writer.writerow(['Email', 'First Name', 'Last Name', 'Company', 'Title', 'hook'])
+        for c in group:
+            raw_hook = c.get('hook', '') or ''
+            hook = raw_hook.strip() if (c.get('track') == 'Personal Outreach' and raw_hook.strip()) else '_'
+            writer.writerow([
+                c.get('email', ''),
+                c.get('firstName', ''),
+                c.get('lastName', ''),
+                c.get('company', ''),
+                c.get('jobTitle', ''),
+                hook
+            ])
+        csv_bytes = buf.getvalue().encode('utf-8')
+
+        options = {
+            "mapping": {
+                "prospect": {
+                    "email": "Email",
+                    "firstName": "First Name",
+                    "lastName": "Last Name",
+                    "company": "Company",
+                    "title": "Title"
+                },
+                "customFields": [
+                    {"apiKey": "hook", "csvColumn": "hook"}
+                ]
+            },
+            "overwriteExisting": True,
+            "campaignId": int(seq_id)
         }
-        p_resp = requests.post('https://api.reply.io/v1/people',
-                               headers=headers, json=person_payload, timeout=15)
-        debug_log.append({'step': 'create_person', 'email': email, 'hook': hook,
-                          'track': track, 'seq_id': seq_id,
-                          'status': p_resp.status_code, 'body': p_resp.text[:200]})
 
-        if not p_resp.ok:
-            failed += 1
-            errors.append({'email': email, 'error': f'Create failed: {p_resp.status_code} {p_resp.text[:200]}'})
-            continue
-
-        # Get the contact ID from the create response
-        # Reply.io returns different shapes for new vs existing contacts
-        person_data = p_resp.json() if p_resp.text else {}
-        contact_id = (
-            person_data.get('id') or
-            person_data.get('personId') or
-            person_data.get('data', {}).get('id') if isinstance(person_data.get('data'), dict) else None
-        )
-
-        # If still no ID, contact likely already exists — look it up by email
-        if not contact_id:
-            lookup_resp = requests.get(
-                'https://api.reply.io/v1/people',
-                headers=headers,
-                params={'email': email},
-                timeout=15
-            )
-            debug_log.append({'step': 'lookup_by_email', 'email': email,
-                              'status': lookup_resp.status_code, 'body': lookup_resp.text[:300]})
-            if lookup_resp.ok:
-                lookup_data = lookup_resp.json()
-                # Response may be a single object or a list
-                if isinstance(lookup_data, list) and lookup_data:
-                    contact_id = lookup_data[0].get('id')
-                elif isinstance(lookup_data, dict):
-                    contact_id = lookup_data.get('id') or lookup_data.get('personId')
-
-        if not contact_id:
-            failed += 1
-            errors.append({'email': email, 'error': f'Could not get contact ID after create and lookup. Create response: {p_resp.text[:200]}'})
-            continue
-
-        # Step 2: Remove from any existing campaign (email in body, not URL)
-        remove_resp = requests.delete(
-            'https://api.reply.io/v1/people/deletefrompushcampaigns',
+        import json as _json
+        resp = requests.post(
+            'https://api.reply.io/v1/people/import/schedules-embedded',
             headers=headers,
-            json={'email': email},
-            timeout=15
+            files={
+                'file': ('contacts.csv', csv_bytes, 'text/csv'),
+                'options': (None, _json.dumps(options), 'application/json')
+            },
+            timeout=60
         )
-        debug_log.append({'step': 'remove_from_campaign', 'email': email,
-                          'status': remove_resp.status_code, 'body': remove_resp.text[:200]})
+        debug_log.append({
+            'step': 'import',
+            'seq_id': seq_id,
+            'count': len(group),
+            'status': resp.status_code,
+            'body': resp.text[:500]
+        })
 
-        # Step 3: Enroll in sequence (email in body, not URL)
-        enroll_resp = requests.post(
-            'https://api.reply.io/v1/people/addtocampaign',
-            headers=headers,
-            json={'email': email, 'campaignId': int(seq_id)},
-            timeout=15
-        )
-        debug_log.append({'step': 'enroll', 'email': email,
-                          'contact_id': contact_id, 'seq_id': seq_id,
-                          'status': enroll_resp.status_code, 'body': enroll_resp.text[:300]})
-
-        if enroll_resp.ok or enroll_resp.status_code == 200:
-            enrolled += 1
+        if resp.ok:
+            enrolled += len(group)
         else:
-            failed += 1
-            errors.append({'email': email, 'error': f'Enroll failed: {enroll_resp.status_code} {enroll_resp.text[:200]}'})
+            failed += len(group)
+            for c in group:
+                errors.append({'email': c.get('email'), 'error': f'Import failed: {resp.status_code} {resp.text[:200]}'})
 
-        time.sleep(0.5)  # avoid Reply.io rate limiting
+    push_group(personal_contacts, personal_seq_id)
+    push_group(standard_contacts, standard_seq_id)
 
     return jsonify({'ok': True, 'enrolled': enrolled, 'failed': failed,
                     'errors': errors, 'debug': debug_log})
