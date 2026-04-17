@@ -5,7 +5,7 @@ import uuid
 import threading
 import requests
 from flask import Flask, request, jsonify, send_from_directory, Response
-from flask_cors import CORS
+from flask_cors import CORS 
 
 app = Flask(__name__, static_folder=None)
 CORS(app)
