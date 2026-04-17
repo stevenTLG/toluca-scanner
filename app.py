@@ -830,10 +830,28 @@ def rollback():
             failed.append(cid)
     return jsonify({'ok': True, 'cleared': cleared, 'failed': len(failed), 'total': len(contact_ids)})
 
+@app.route('/ping')
+def ping():
+    return jsonify({'ok': True, 'ts': time.time()})
+
 @app.route('/health')
 def health():
     return jsonify({'ok': True, 'hubspot': bool(HUBSPOT_TOKEN), 'anthropic': bool(ANTHROPIC_KEY),
                     'active_jobs': sum(1 for j in JOBS.values() if not j['done'])})
+
+def _keepalive():
+    """Ping self every 5 minutes so Render doesn't spin down during active use."""
+    import urllib.request
+    time.sleep(60)  # wait for server to fully start first
+    while True:
+        try:
+            port = int(os.environ.get('PORT', 5000))
+            urllib.request.urlopen(f'http://localhost:{port}/ping', timeout=10)
+        except Exception:
+            pass
+        time.sleep(270)  # every 4.5 minutes
+
+threading.Thread(target=_keepalive, daemon=True).start()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
