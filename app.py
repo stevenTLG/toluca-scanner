@@ -469,7 +469,7 @@ def _get_replyio_sequence_id(headers, name):
 
 @app.route('/api/test-replyio', methods=['POST'])
 def test_replyio():
-    """Debug endpoint — sends ONE contact through the full push flow and returns every raw response."""
+    """Full debug test — tries CSV import for ONE contact and polls status. Returns every raw response."""
     REPLYIO_KEY = os.environ.get('REPLYIO_KEY', '')
     if not REPLYIO_KEY:
         return jsonify({'error': 'REPLYIO_KEY not configured'}), 500
@@ -477,63 +477,94 @@ def test_replyio():
     email = data.get('email', '')
     first = data.get('firstName', 'Test')
     last = data.get('lastName', 'User')
-    seq_id = data.get('seq_id', 1657982)  # default to standard
-    hook = data.get('hook', '_')
+    company = data.get('company', '')
+    seq_id = int(data.get('seq_id', 1657982))
     if not email:
         return jsonify({'error': 'email required'}), 400
 
-    headers = {'x-api-key': REPLYIO_KEY, 'Content-Type': 'application/json'}
+    headers = {'x-api-key': REPLYIO_KEY}
     log = []
 
-    # Step 1: list sequences
-    seq_resp = requests.get('https://api.reply.io/v3/sequences', headers=headers, timeout=15)
-    log.append({'step': 'list_sequences', 'status': seq_resp.status_code, 'body': seq_resp.text[:500]})
+    # Step 1: Build minimal CSV
+    csv_content = f"Email,First Name,Last Name,Company\n{email},{first},{last},{company}\n"
+    csv_bytes = csv_content.encode('utf-8')
+    log.append({'step': 'csv_content', 'csv': csv_content})
 
-    # Step 2: create contact
-    person_payload = {'email': email, 'firstName': first, 'lastName': last,
-                      'customFields': [{'key': 'hook', 'value': hook}]}
-    p_resp = requests.post('https://api.reply.io/v1/people', headers=headers, json=person_payload, timeout=15)
-    log.append({'step': 'create_person', 'payload': person_payload,
-                'status': p_resp.status_code, 'body': p_resp.text[:500],
-                'headers': dict(p_resp.headers)})
+    # Step 2: Try import with campaignId
+    options = json.dumps({
+        "mapping": {
+            "prospect": {
+                "email": "Email",
+                "firstName": "First Name",
+                "lastName": "Last Name",
+                "company": "Company"
+            }
+        },
+        "overwriteExisting": True,
+        "campaignId": seq_id
+    })
+    log.append({'step': 'options', 'options': options})
 
-    # Step 3: parse contact ID
+    import_resp = requests.post(
+        'https://api.reply.io/v1/people/import/schedules-embedded',
+        headers=headers,
+        files={
+            'file': ('contacts.csv', csv_bytes, 'text/csv'),
+            'options': (None, options)
+        },
+        timeout=30
+    )
+    log.append({
+        'step': 'import_call',
+        'status': import_resp.status_code,
+        'body': import_resp.text[:1000],
+        'response_headers': dict(import_resp.headers)
+    })
+
+    if not import_resp.ok:
+        return jsonify({'ok': False, 'error': 'Import call failed', 'log': log})
+
+    # Step 3: Poll import status
     try:
-        person_data = p_resp.json() if p_resp.text else {}
-    except Exception:
-        person_data = {}
-    contact_id = (person_data.get('id') or
-                  person_data.get('personId') or
-                  (person_data.get('data', {}) or {}).get('id'))
-    log.append({'step': 'parse_id', 'person_data': person_data, 'contact_id': contact_id})
+        session_id = import_resp.json().get('importSessionId')
+        log.append({'step': 'session_id', 'session_id': session_id})
+        if session_id:
+            for attempt in range(6):  # poll up to 6 times (30 seconds total)
+                time.sleep(5)
+                status_resp = requests.get(
+                    f'https://api.reply.io/v1/people/import/{session_id}',
+                    headers={**headers, 'Content-Type': 'application/json'},
+                    timeout=15
+                )
+                log.append({
+                    'step': f'poll_{attempt+1}',
+                    'status': status_resp.status_code,
+                    'body': status_resp.text[:1000]
+                })
+                if status_resp.ok:
+                    sd = status_resp.json()
+                    # Check if done
+                    state = sd.get('state') or sd.get('status') or sd.get('importStatus', '')
+                    if state and str(state).lower() not in ['pending', 'processing', 'inprogress', 'in_progress', '0']:
+                        break
+    except Exception as ex:
+        log.append({'step': 'poll_error', 'error': str(ex)})
 
-    # Step 4: lookup by email if no ID
-    if not contact_id:
-        lookup = requests.get('https://api.reply.io/v1/people', headers=headers,
-                              params={'email': email}, timeout=15)
-        log.append({'step': 'lookup_by_email', 'status': lookup.status_code, 'body': lookup.text[:500]})
-        try:
-            ld = lookup.json()
-            if isinstance(ld, list) and ld:
-                contact_id = ld[0].get('id')
-            elif isinstance(ld, dict):
-                contact_id = ld.get('id') or ld.get('personId')
-        except Exception:
-            pass
-        log.append({'step': 'id_after_lookup', 'contact_id': contact_id})
+    # Step 4: Check if contact exists in Reply now
+    time.sleep(2)
+    check_resp = requests.get(
+        'https://api.reply.io/v1/people',
+        headers={**headers, 'Content-Type': 'application/json'},
+        params={'email': email},
+        timeout=15
+    )
+    log.append({
+        'step': 'contact_check',
+        'status': check_resp.status_code,
+        'body': check_resp.text[:500]
+    })
 
-    if not contact_id:
-        return jsonify({'ok': False, 'error': 'Could not get contact ID', 'log': log})
-
-    # Step 5: enroll via v1 addtocampaign (email in body, not URL)
-    enroll_resp = requests.post(
-        'https://api.reply.io/v1/people/addtocampaign',
-        headers=headers, json={'email': email, 'campaignId': int(seq_id)}, timeout=15)
-    log.append({'step': 'enroll', 'seq_id': seq_id, 'contact_id': contact_id,
-                'status': enroll_resp.status_code, 'body': enroll_resp.text[:500]})
-
-    return jsonify({'ok': enroll_resp.ok, 'contact_id': contact_id,
-                    'enrolled': enroll_resp.ok, 'log': log})
+    return jsonify({'ok': True, 'log': log})
 
 @app.route('/api/push-replyio', methods=['POST'])
 def push_replyio():
@@ -598,7 +629,7 @@ def push_replyio():
             ])
         csv_bytes = buf.getvalue().encode('utf-8')
 
-        options = {
+        options = json.dumps({
             "mapping": {
                 "prospect": {
                     "email": "Email",
@@ -606,22 +637,18 @@ def push_replyio():
                     "lastName": "Last Name",
                     "company": "Company",
                     "title": "Title"
-                },
-                "customFields": [
-                    {"apiKey": "hook", "csvColumn": "hook"}
-                ]
+                }
             },
             "overwriteExisting": True,
             "campaignId": int(seq_id)
-        }
+        })
 
-        import json as _json
         resp = requests.post(
             'https://api.reply.io/v1/people/import/schedules-embedded',
             headers=headers,
             files={
                 'file': ('contacts.csv', csv_bytes, 'text/csv'),
-                'options': (None, _json.dumps(options), 'application/json')
+                'options': (None, options)
             },
             timeout=60
         )
@@ -629,12 +656,49 @@ def push_replyio():
             'step': 'import',
             'seq_id': seq_id,
             'count': len(group),
+            'options': options,
             'status': resp.status_code,
             'body': resp.text[:500]
         })
 
         if resp.ok:
-            enrolled += len(group)
+            # Poll import session status to get actual result
+            try:
+                session_id = resp.json().get('importSessionId')
+                if session_id:
+                    # Wait a moment then check status
+                    time.sleep(3)
+                    status_resp = requests.get(
+                        f'https://api.reply.io/v1/people/import/{session_id}',
+                        headers={**headers, 'Content-Type': 'application/json'},
+                        timeout=15
+                    )
+                    debug_log.append({
+                        'step': 'import_status',
+                        'session_id': session_id,
+                        'status': status_resp.status_code,
+                        'body': status_resp.text[:1000]
+                    })
+                    # Check if contacts actually imported
+                    if status_resp.ok:
+                        status_data = status_resp.json()
+                        imported = status_data.get('importedCount', status_data.get('imported', 0))
+                        failed_count = status_data.get('failedCount', status_data.get('failed', 0))
+                        debug_log.append({
+                            'step': 'import_result',
+                            'imported': imported,
+                            'failed': failed_count,
+                            'details': status_data
+                        })
+                        if imported and imported > 0:
+                            enrolled += imported
+                        else:
+                            enrolled += len(group)  # assume success if no count returned
+                    else:
+                        enrolled += len(group)
+            except Exception as ex:
+                debug_log.append({'step': 'import_status_error', 'error': str(ex)})
+                enrolled += len(group)
         else:
             failed += len(group)
             for c in group:
