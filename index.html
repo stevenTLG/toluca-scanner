@@ -677,7 +677,7 @@ async function saveBatchToHistory(batchId, total, prePopulated) {
   } catch(e) {}
 }
 
-async function updateBatchHistoryStatus(batchId, screened, personal, standard, pushed) {
+async function updateBatchHistoryStatus(batchId, screened, personal, standard) {
   try {
     const existing = await window.storage.get('batch_history').catch(()=>null);
     let history = [];
@@ -687,7 +687,6 @@ async function updateBatchHistoryStatus(batchId, screened, personal, standard, p
       history[idx].screened = screened;
       history[idx].personal = personal;
       history[idx].standard = standard;
-      if (pushed) history[idx].pushed = true;
       history[idx].lastUpdated = new Date().toISOString();
       await window.storage.set('batch_history', JSON.stringify(history));
     }
@@ -711,9 +710,7 @@ async function renderBatchHistory() {
     el.innerHTML = history.map(b => {
       const date = b.lastOpened ? new Date(b.lastOpened).toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) : '';
       let statusHtml = '';
-      if (b.pushed) {
-        statusHtml = `<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:rgba(76,175,125,0.15);color:var(--green);border:1px solid rgba(76,175,125,0.3);letter-spacing:0.5px">Pushed</span>`;
-      } else if (b.screened) {
+      if (b.screened) {
         statusHtml = `<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:rgba(201,168,76,0.12);color:var(--gold);border:1px solid rgba(201,168,76,0.3);letter-spacing:0.5px">Screened</span>`;
       } else if (b.prePopulated > 0) {
         statusHtml = `<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:rgba(136,136,136,0.15);color:var(--text-muted);border:1px solid var(--border);letter-spacing:0.5px">Partial</span>`;
@@ -1173,47 +1170,18 @@ function showBatchControls(batchId) {
     <span style="font-size:12px;color:var(--gold);font-weight:600;letter-spacing:0.5px">${batchId}</span>
     <span style="font-size:11px;color:var(--text-muted)">${allContacts.length} contacts</span>
     <div style="flex:1"></div>
-    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-      <span style="font-size:10px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">Personal ID</span>
-      <input id="inline-personal-seq" type="text" placeholder="e.g. 1657027"
-        style="width:90px;padding:5px 8px;background:var(--dark-3);color:var(--gold);border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace"
-        oninput="saveInlineSeqIds()" />
-      <span style="font-size:10px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase">Standard ID</span>
-      <input id="inline-standard-seq" type="text" placeholder="e.g. 1657041"
-        style="width:90px;padding:5px 8px;background:var(--dark-3);color:var(--gold);border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace"
-        oninput="saveInlineSeqIds()" />
-    </div>
+
     <button class="btn btn-secondary" onclick="writeResultsToHubSpot()" style="font-size:12px;padding:8px 16px" id="btn-write-hs">
       ↑ Write to HubSpot
     </button>
     <button class="btn btn-secondary" onclick="rollbackHubSpot()" style="font-size:12px;padding:8px 16px;color:var(--red);border-color:rgba(232,92,76,0.4)" id="btn-rollback">
       ✕ Rollback HubSpot
     </button>
-    <button class="btn btn-secondary" onclick="exportReplyCSV('Personal Outreach')" style="font-size:12px;padding:8px 16px;color:var(--gold);border-color:rgba(201,168,76,0.4)" id="btn-export-personal">
-      ↓ Personal CSV
-    </button>
-    <button class="btn btn-secondary" onclick="exportReplyCSV('Standard Sequence')" style="font-size:12px;padding:8px 16px;color:var(--green);border-color:rgba(76,175,125,0.4)" id="btn-export-standard">
-      ↓ Standard CSV
-    </button>
-    <button class="btn btn-primary" onclick="pushToReplyIo()" style="font-size:12px;padding:8px 16px" id="btn-push-reply">
-      → Push to Reply.io
-    </button>
+
+
+
   `;
-  // Populate inline fields from saved storage
-  window.storage.get('replyio_sequences').then(data => {
-    if (data && data.value) {
-      const seqs = JSON.parse(data.value);
-      const pEl = document.getElementById('inline-personal-seq');
-      const sEl = document.getElementById('inline-standard-seq');
-      if (pEl) pEl.value = seqs.personal || '';
-      if (sEl) sEl.value = seqs.standard || '';
-      // Also sync to criteria page fields if open
-      const cpEl = document.getElementById('replyio-personal-seq');
-      const csEl = document.getElementById('replyio-standard-seq');
-      if (cpEl) cpEl.value = seqs.personal || '';
-      if (csEl) csEl.value = seqs.standard || '';
-    }
-  }).catch(()=>{});
+
   toolbar.parentNode.insertBefore(bar, toolbar);
 }
 
@@ -1236,7 +1204,7 @@ async function rollbackHubSpot() {
     const data = await resp.json();
     if (data.ok) {
       // Clear local state too
-      results = {}; overrides = {}; notes = {}; hookEdits = {}; pushed = {};
+      results = {}; overrides = {}; notes = {}; hookEdits = {};
       // Clear persisted contact meta
       try { localStorage.removeItem('tl_contact_meta_' + BATCH_ID); } catch(e) {}
       // Remove from batch history
@@ -1319,121 +1287,10 @@ async function writeResultsToHubSpot() {
   }
 }
 
-async function saveInlineSeqIds() {
-  const pEl = document.getElementById('inline-personal-seq');
-  const sEl = document.getElementById('inline-standard-seq');
-  if (!pEl || !sEl) return;
-  try {
-    await window.storage.set('replyio_sequences', JSON.stringify({
-      personal: pEl.value.trim(),
-      standard: sEl.value.trim()
-    }));
-  } catch(e) {}
-}
-
-async function pushToReplyIo() {
-  const btn = document.getElementById('btn-push-reply');
-
-  const contacts = allContacts
-    .map((c, i) => {
-      const r = results[i];
-      if (!r || r.status !== 'done' || !c.email) return null;
-      const track = overrides[i] ? (overrides[i] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track;
-      return {
-        email:     c.email,
-        firstName: c.firstName,
-        lastName:  c.lastName,
-        company:   c.company  || '',
-        jobTitle:  c.jobTitle || '',
-        track,
-        hook: hookEdits[i] !== undefined ? hookEdits[i] : (r.hook || '')
-      };
-    })
-    .filter(Boolean);
-
-  if (!contacts.length) { await showAlert('No screened contacts with emails to push.'); return; }
-
-  const personal = contacts.filter(c => c.track === 'Personal Outreach').length;
-  const standard = contacts.filter(c => c.track === 'Standard Sequence').length;
-  const ok = await showConfirm(
-    'Push to Reply.io',
-    `Push ${contacts.length} contacts? ${personal} Personal Outreach, ${standard} Standard Sequence.`,
-    'Push', 'Cancel'
-  );
-  if (!ok) return;
-
-  btn.textContent = 'Pushing...'; btn.disabled = true;
-
-  try {
-    const resp = await fetch('/api/push-replyio', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contacts,
-        personal_sequence_name: 'Personal sequence',
-        standard_sequence_name: 'Standard sequence'
-      })
-    });
-    const data = await resp.json();
-
-    // Log debug info to console for troubleshooting
-    if (data.debug) console.log('[Push Debug]', JSON.stringify(data.debug, null, 2));
-
-    if (data.ok) {
-      btn.textContent = `✓ ${data.enrolled} enrolled`;
-      btn.style.background = 'rgba(76,175,125,0.15)';
-      btn.style.color = 'var(--green)';
-      btn.style.borderColor = 'rgba(76,175,125,0.3)';
-
-      if (data.failed > 0) {
-        console.warn('[Push] Failed:', data.errors);
-        await showAlert(`${data.enrolled} enrolled, ${data.failed} failed. Check browser console for details.`);
-      }
-
-      // Mark each pushed contact's row with Pushed badge
-      allContacts.forEach((c, i) => {
-        const r = results[i];
-        if (!r || r.status !== 'done' || !c.email) return;
-        const track = overrides[i] ? (overrides[i] === 'personal' ? 'Personal Outreach' : 'Standard Sequence') : r.track;
-        if (track === 'Personal Outreach' || track === 'Standard Sequence') {
-          pushed[i] = true;
-          renderRow(i);
-        }
-      });
-      // Mark batch as pushed in storage
-      if (BATCH_ID) {
-        try {
-          await window.storage.set('screener_status_' + BATCH_ID, JSON.stringify({
-            status: 'pushed', enrolled: data.enrolled, personal, standard,
-            timestamp: new Date().toISOString()
-          }));
-          await updateBatchHistoryStatus(BATCH_ID, contacts.length, personal, standard, true);
-        } catch(e) {}
-      }
-      setTimeout(() => {
-        btn.textContent = '→ Push to Reply.io';
-        btn.style.background = '';
-        btn.style.color = '';
-        btn.style.borderColor = '';
-        btn.disabled = false;
-      }, 4000);
-    } else {
-      const errMsg = data.error || `${data.failed} failed`;
-      btn.textContent = `⚠ Error`;
-      btn.disabled = false;
-      await showAlert('Push failed: ' + errMsg + '\n\nCheck browser console for debug details.');
-    }
-  } catch(e) {
-    btn.textContent = 'Error'; btn.disabled = false;
-    console.error(e);
-    await showAlert('Network error: ' + e.message);
-  }
-}
 let results = {};
 let overrides = {};   // index -> true/false
 let notes = {};       // index -> string
 let hookEdits = {};   // index -> string (edited hook)
-let pushed = {};      // index -> true (contact was pushed to Reply.io)
 let isProcessing = false;
 let shouldStop = false;
 let currentFilter = 'all';
@@ -2653,8 +2510,7 @@ function buildRowHTML(contact, result, index) {
     const isPersonal = result.track === 'Personal Outreach' || hasOverride;
     const badgeClass = hasOverride && result.track !== 'Personal Outreach' ? 'track-override' : isPersonal ? 'track-personal' : 'track-standard';
     const badgeLabel = hasOverride && result.track !== 'Personal Outreach' ? 'Personal (Override)' : isPersonal ? 'Personal Outreach' : 'Standard Sequence';
-    const isPushed = !!pushed[index];
-    trackHTML = `<span class="track-badge ${badgeClass}">${badgeLabel}</span>${isPushed ? '<span class="layer-badge" style="background:rgba(76,175,125,0.15);color:var(--green);border:1px solid rgba(76,175,125,0.3);margin-left:4px">✓ Pushed</span>' : ''}`;
+    trackHTML = `<span class="track-badge ${badgeClass}">${badgeLabel}</span>`;
     trackHTML += '<div class="override-row">';
     if (hasOverride) {
       trackHTML += `<button class="override-btn active" onclick="removeOverride(${index})">✓ Override  -  Remove</button>`;
@@ -2967,48 +2823,6 @@ function setFilter(filter, btn) {
 }
 
 // ─── EXPORT CSV ───────────────────────────────────────────────
-// ─── REPLY.IO CSV EXPORT ─────────────────────────────────────────────────────
-function exportReplyCSV(track) {
-  const indices = getSortedIndices();
-  const rows = [['Email', 'First Name', 'Last Name', 'Company', 'Title', 'hook']];
-
-  indices.forEach(i => {
-    const c = allContacts[i];
-    const r = results[i];
-    if (!r || r.status !== 'done' || !c.email) return;
-    const effectiveTrack = overrides[i]
-      ? (overrides[i] === 'personal' ? 'Personal Outreach' : 'Standard Sequence')
-      : r.track;
-    if (effectiveTrack !== track) return;
-    const hook = track === 'Personal Outreach'
-      ? (hookEdits[i] || r.hook || '')
-      : '_';
-    rows.push([
-      c.email,
-      c.firstName || '',
-      c.lastName || '',
-      c.company || '',
-      c.jobTitle || '',
-      hook
-    ]);
-  });
-
-  if (rows.length <= 1) {
-    showAlert(`No screened contacts found for ${track}.`);
-    return;
-  }
-
-  const csv = rows.map(r => r.map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  const trackSlug = track === 'Personal Outreach' ? 'personal' : 'standard';
-  const batchSlug = BATCH_ID ? BATCH_ID.replace(/[^a-zA-Z0-9-]/g, '_') : 'batch';
-  a.download = `reply_${trackSlug}_${batchSlug}.csv`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 function exportCSV() {
   const headers = ['First Name','Last Name','Company','Location','Industry','Email','Track','Score','Connection Types','Hook','Notes','Confidence','Layer','Override'];
@@ -3402,26 +3216,18 @@ let customTriggers = []; // [{id, label, weight}]
 
 (async () => {
   try {
-    const [cw, cf, ct, cc, cp, rseq] = await Promise.all([
+    const [cw, cf, ct, cc, cp] = await Promise.all([
       window.storage.get('criteria_weights').catch(()=>null),
       window.storage.get('criteria_feedback').catch(()=>null),
       window.storage.get('criteria_threshold').catch(()=>null),
       window.storage.get('criteria_custom_triggers').catch(()=>null),
       window.storage.get('criteria_profile').catch(()=>null),
-      window.storage.get('replyio_sequences').catch(()=>null)
     ]);
     if (cw && cw.value) criteriaWeights = JSON.parse(cw.value);
     if (cf && cf.value) feedbackItems = JSON.parse(cf.value);
     if (ct && ct.value) criteriaThreshold = parseInt(ct.value) || 40;
     if (cc && cc.value) customTriggers = JSON.parse(cc.value);
     if (cp && cp.value) profileCache = { ...PROFILE_DEFAULTS, ...JSON.parse(cp.value) };
-    if (rseq && rseq.value) {
-      const seqs = JSON.parse(rseq.value);
-      const pEl = document.getElementById('replyio-personal-seq');
-      const sEl = document.getElementById('replyio-standard-seq');
-      if (pEl) pEl.value = seqs.personal || '';
-      if (sEl) sEl.value = seqs.standard || '';
-    }
     document.getElementById('thresholdInput').value = criteriaThreshold;
   } catch(e) {}
 })();
@@ -3548,15 +3354,6 @@ function renderCriteriaPage() {
   renderFeedbackList();
 
   // Populate Reply.io sequence ID fields from storage
-  window.storage.get('replyio_sequences').then(data => {
-    if (data && data.value) {
-      const seqs = JSON.parse(data.value);
-      const pEl = document.getElementById('replyio-personal-seq');
-      const sEl = document.getElementById('replyio-standard-seq');
-      if (pEl && !pEl.value) pEl.value = seqs.personal || '';
-      if (sEl && !sEl.value) sEl.value = seqs.standard || '';
-    }
-  }).catch(()=>{});
 }
 
 function setWeight(id, w) {
@@ -3615,12 +3412,6 @@ async function saveCriteria() {
     await window.storage.set('criteria_custom_triggers', JSON.stringify(customTriggers));
     await window.storage.set('criteria_profile', JSON.stringify(profileData));
     profileCache = { ...profileData }; // keep cache in sync
-    // Save Reply.io sequence IDs
-    const replyioSeqs = {
-      personal: (document.getElementById('replyio-personal-seq') || {}).value || '',
-      standard: (document.getElementById('replyio-standard-seq') || {}).value || ''
-    };
-    await window.storage.set('replyio_sequences', JSON.stringify(replyioSeqs));
   } catch(e) {}
   const saved = document.getElementById('criteriaSaved');
   if (saved) { saved.style.display = 'inline'; setTimeout(() => saved.style.display='none', 3000); }
@@ -3896,21 +3687,8 @@ function getFullEmail(contact, result, index) {
         <div class="profile-field"><label>Education</label><input type="text" id="profileEducation" oninput="autoSaveCriteria()"></div>
         <div class="profile-field"><label>Other Key Details</label><textarea id="profileOther" oninput="autoSaveCriteria()"></textarea></div>
       </div>
+      </div>
 
-      <!-- Reply.io Sequences -->
-      <div class="criteria-card" style="grid-column:1/-1">
-        <h3 style="margin-bottom:6px">Reply.io Sequences</h3>
-        <p style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Set your sequence IDs once here — used every time you push to Reply.io. Find these in Reply.io → Sequences → click a sequence → the ID is in the URL.</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div class="profile-field">
-            <label>Personal Outreach Sequence ID</label>
-            <input type="text" id="replyio-personal-seq" placeholder="e.g. 12345" style="font-family:monospace">
-          </div>
-          <div class="profile-field">
-            <label>Standard Sequence Sequence ID</label>
-            <input type="text" id="replyio-standard-seq" placeholder="e.g. 67890" style="font-family:monospace">
-          </div>
-        </div>
       </div>
     </div>
 
