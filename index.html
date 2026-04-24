@@ -279,7 +279,9 @@
     <button class="sort-btn" id="sortIndustryBtn" onclick="toggleSort('industry')">⊞ Cluster by Industry</button>
     <div class="spacer"></div>
     <button class="export-btn" onclick="exportCSV()">↓ Export CSV</button>
-    <button class="export-btn" onclick="exportExcel()" style="color:var(--green);border-color:rgba(76,175,125,0.3)" title="Export full results to Excel">↓ Export Excel</button>
+    <button class="export-btn" onclick="exportTrackCSV('Personal Outreach')" style="color:var(--gold);border-color:rgba(201,168,76,0.3)" title="Export Personal Outreach contacts only">↓ Personal CSV</button>
+    <button class="export-btn" onclick="exportTrackCSV('Standard Sequence')" style="color:var(--green);border-color:rgba(76,175,125,0.3)" title="Export Standard Sequence contacts only">↓ Standard CSV</button>
+    <button class="export-btn" onclick="exportExcel()" style="color:var(--text-muted)" title="Export full results to Excel">↓ Export Excel</button>
     <button class="export-btn" onclick="triggerImport()" style="color:var(--gold);border-color:rgba(201,168,76,0.3)" title="Import contacts from a Grata CSV export">↑ Import CSV</button>
     <input type="file" id="csvFileInput" accept=".csv" style="display:none" onchange="handleCSVImport(event)">
     <button class="export-btn" style="color:var(--red);border-color:var(--border)" onclick="hardReset()">✕ Clear</button>
@@ -2849,6 +2851,46 @@ function exportCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url;
   a.download = 'toluca_lake_screened_contacts.csv'; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exportTrackCSV(track) {
+  // Export only contacts matching the given track (Personal Outreach or Standard Sequence)
+  const isPersonal = track === 'Personal Outreach';
+  const headers = ['First Name','Last Name','Company','Title','Location','Industry','Email','LinkedIn','Score','Hook','Connection Types','Notes'];
+  const rows = [headers];
+  const indices = getSortedIndices();
+  let count = 0;
+  indices.forEach(i => {
+    const c = allContacts[i];
+    const r = results[i];
+    if (!r || r.status !== 'done') return;
+    const hasOverride = !!overrides[i];
+    const effectiveTrack = hasOverride ? 'Personal Outreach' : r.track;
+    if (effectiveTrack !== track) return;
+    const currentHook = hookEdits[i] || (r.hook) || '';
+    rows.push([
+      c.firstName, c.lastName, c.company, c.jobTitle || '', c.location, c.industry, c.email,
+      c.linkedin || '',
+      r.score || 0,
+      currentHook,
+      r.connections ? r.connections.map(cn => cn.type).join('; ') : '',
+      notes[i] || ''
+    ]);
+    count++;
+  });
+  if (count === 0) {
+    showAlert(`No ${track} contacts to export. Run the screener first.`);
+    return;
+  }
+  const csv = rows.map(r => r.map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url;
+  const slug = isPersonal ? 'personal_outreach' : 'standard_sequence';
+  const batchSlug = BATCH_ID ? BATCH_ID.replace(/[^a-zA-Z0-9_-]/g,'_') : 'export';
+  a.download = `tlg_${slug}_${batchSlug}.csv`;
+  a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
