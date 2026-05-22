@@ -12,6 +12,12 @@ CORS(app)
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# ─── MODEL CONFIG ─────────────────────────────────────────────────────────────
+# Single source of truth for the screening model. Override via env var if needed.
+# NOTE: 'claude-sonnet-4-20250514' was RETIRED on 2026-04-20 — using it caused
+# every API call to fail, which is why the screener "completed" with 0 results.
+SCREENING_MODEL = os.environ.get('SCREENING_MODEL', 'claude-sonnet-4-6')
+
 @app.after_request
 def allow_iframe(response):
     response.headers['X-Frame-Options'] = 'ALLOWALL'
@@ -246,7 +252,7 @@ def _parse_result(text):
 def _screen_one(contact, criteria):
     prompt, has_name = _build_prompt(contact, criteria)
     body = {
-        'model': 'claude-sonnet-4-20250514',
+        'model': SCREENING_MODEL,
         'max_tokens': 1200,
         'messages': [{'role': 'user', 'content': prompt}]
     }
@@ -274,8 +280,13 @@ def _screen_one(contact, criteria):
 def _run_job(job_id, contacts, criteria):
     with JOBS_LOCK:
         JOBS[job_id]['status'] = 'running'
+        JOBS[job_id]['heartbeat'] = time.time()
     processed, errors = 0, []
     for i, contact in enumerate(contacts):
+        # Heartbeat: proves this thread is alive. screen_batch reads this to tell
+        # a live job from a corpse left behind by a dyno restart (the 409 loop bug).
+        with JOBS_LOCK:
+            JOBS[job_id]['heartbeat'] = time.time()
         if contact.get('existing_track') and contact.get('existing_score'):
             with JOBS_LOCK:
                 JOBS[job_id]['skipped'] = JOBS[job_id].get('skipped', 0) + 1
@@ -298,6 +309,7 @@ def _run_job(job_id, contacts, criteria):
             processed += 1
             with JOBS_LOCK:
                 JOBS[job_id]['processed'] = processed
+                JOBS[job_id]['heartbeat'] = time.time()
                 JOBS[job_id]['tokens_input'] += tok_in
                 JOBS[job_id]['tokens_output'] += tok_out
                 JOBS[job_id]['results'][contact['hubspot_id']] = result
@@ -311,16 +323,22 @@ def _run_job(job_id, contacts, criteria):
             processed += 1
             with JOBS_LOCK:
                 JOBS[job_id]['processed'] = processed
-        JOBS[job_id]['errors'] = errors
+                JOBS[job_id]['heartbeat'] = time.time()
+        with JOBS_LOCK:
+            JOBS[job_id]['errors'] = errors
         if i < len(contacts) - 1:
             time.sleep(2)
-        # Pause support — wait here until unpaused
+        # Pause support — wait here until unpaused, keeping the heartbeat fresh
+        # so a paused job is never mistaken for a dead one.
         while JOBS.get(job_id, {}).get('paused'):
+            with JOBS_LOCK:
+                JOBS[job_id]['heartbeat'] = time.time()
             time.sleep(1)
     with JOBS_LOCK:
         JOBS[job_id].update({
             'status': 'done', 'done': True, 'errors': errors,
-            'processed': processed, 'current_contact': None, 'finished_at': time.time()
+            'processed': processed, 'current_contact': None,
+            'heartbeat': time.time(), 'finished_at': time.time()
         })
 
 @app.route('/api/pause-job', methods=['POST'])
@@ -343,25 +361,31 @@ def screen_batch():
     data = request.get_json(force=True)
     batch_id = data.get('batch_id', '').strip()
     criteria = data.get('criteria', {})
+    force = bool(data.get('force'))  # frontend can force-kill a stuck job and start fresh
     if not batch_id:
         return jsonify({'error': 'batch_id required'}), 400
     with JOBS_LOCK:
         for jid, job in list(JOBS.items()):
             if job.get('batch_id') == batch_id and not job.get('done'):
-                # Check if job is stale — no progress in last 10 minutes
-                started = job.get('started_at', 0)
-                age = time.time() - started
-                processed = job.get('processed', 0)
-                total = job.get('total', 1)
-                # Stale if: running >10min AND processed 0, OR running >30min total
-                is_stale = (age > 600 and processed == 0) or (age > 1800)
-                if is_stale:
-                    # Mark dead and allow new job
+                # A live worker thread updates 'heartbeat' on every loop iteration.
+                # If the heartbeat is stale, the thread is dead (e.g. dyno restart) —
+                # the job is a corpse and must not block a new run.
+                now = time.time()
+                heartbeat = job.get('heartbeat', job.get('started_at', 0))
+                hb_age = now - heartbeat
+                DEAD_AFTER = 90  # seconds without a heartbeat = thread is gone
+                is_dead = hb_age > DEAD_AFTER
+                # Honor force-kill only if the job isn't clearly alive. A job with a
+                # fresh heartbeat is genuinely running and must survive a stray reload.
+                LIVE_GRACE = 20  # if heartbeat is younger than this, treat as definitely alive
+                is_alive = hb_age <= LIVE_GRACE
+                if (force and not is_alive) or is_dead:
                     JOBS[jid]['done'] = True
                     JOBS[jid]['status'] = 'stale'
-                    print(f'[screen-batch] Marked stale job {jid} as done (age={age:.0f}s, processed={processed})')
+                    reason = 'forced' if (force and not is_alive) else f'no heartbeat for {hb_age:.0f}s'
+                    print(f'[screen-batch] Killing job {jid} ({reason}) — starting fresh')
                     continue
-                return jsonify({'error': 'Job already running', 'job_id': jid}), 409
+                return jsonify({'error': 'Job already running', 'job_id': jid, 'hb_age': round(hb_age, 1)}), 409
     try:
         contacts = _fetch_contacts(batch_id, full=False)
     except Exception as e:
@@ -376,6 +400,7 @@ def screen_batch():
             'total': to_do, 'total_contacts': len(contacts), 'processed': 0,
             'skipped': already, 'current_contact': None, 'current_index': 0,
             'errors': [], 'results': {}, 'done': False, 'started_at': time.time(),
+            'heartbeat': time.time(),
             'finished_at': None, 'tokens_input': 0, 'tokens_output': 0, 'contact_meta': {}
         }
     threading.Thread(target=_run_job, args=(job_id, contacts, criteria), daemon=True).start()
@@ -388,6 +413,8 @@ def screen_status(job_id):
     if not job:
         return jsonify({'error': 'Job not found'}), 404
     elapsed = int(time.time() - job['started_at'])
+    hb_age = round(time.time() - job.get('heartbeat', job['started_at']), 1)
+    is_dead = (not job['done']) and hb_age > 90
     pct = round((job['processed'] / job['total']) * 100) if job['total'] > 0 else 0
     eta = None
     if job['processed'] > 0 and not job['done'] and job['total'] > 0:
@@ -399,7 +426,7 @@ def screen_status(job_id):
         'processed': job['processed'], 'skipped': job.get('skipped', 0), 'pct': pct,
         'current_contact': job.get('current_contact'), 'errors': job.get('errors', []),
         'error_count': len(job.get('errors', [])), 'done': job['done'],
-        'elapsed_s': elapsed, 'eta_s': eta,
+        'elapsed_s': elapsed, 'eta_s': eta, 'hb_age': hb_age, 'dead': is_dead,
         'tokens_input': job.get('tokens_input', 0), 'tokens_output': job.get('tokens_output', 0),
         'cost': round((job.get('tokens_input', 0) * 3 / 1_000_000) + (job.get('tokens_output', 0) * 15 / 1_000_000), 4),
         'contact_meta': job.get('contact_meta', {}) if job.get('done') else {}
@@ -497,6 +524,7 @@ def ping():
 @app.route('/health')
 def health():
     return jsonify({'ok': True, 'hubspot': bool(HUBSPOT_TOKEN), 'anthropic': bool(ANTHROPIC_KEY),
+                    'model': SCREENING_MODEL,
                     'active_jobs': sum(1 for j in JOBS.values() if not j['done'])})
 
 def _keepalive():
