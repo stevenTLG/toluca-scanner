@@ -1144,6 +1144,7 @@ async function loadBatchFromHubSpot(batchId) {
     overrides = {};
     notes = {};
     hookEdits = {};
+    hookFeedback = {};
 
     // Pre-populate results from existing HubSpot scanner properties
     let prePopulated = 0;
@@ -1179,7 +1180,13 @@ async function loadBatchFromHubSpot(batchId) {
           }
         };
         if (c.existing_hook) hookEdits[i] = c.existing_hook;
-        if (c.existing_notes) notes[i] = c.existing_notes;
+        if (c.existing_notes) {
+          // Extract any saved hook-feedback tag so the feedback box repopulates
+          // when reopening an earlier batch; keep the visible note clean.
+          const fbMatch = c.existing_notes.match(/\[hook feedback:\s*([^\]]*)\]/i);
+          if (fbMatch) hookFeedback[i] = fbMatch[1].trim();
+          notes[i] = c.existing_notes.replace(/\s*\[hook feedback:[^\]]*\]\s*/i, '').trim();
+        }
         if (c.existing_override === 'true') overrides[i] = c.existing_track === 'Personal Outreach' ? 'personal' : 'standard';
         prePopulated++;
       }
@@ -1199,14 +1206,19 @@ async function loadBatchFromHubSpot(batchId) {
     updateStats();
     showBatchControls(batchId);
 
-    // Auto-start screening if ?autostart=1 and contacts need screening
-    if (AUTOSTART && batchId === BATCH_ID) {
+    // Auto-start screening if ?autostart=1 and contacts need screening.
+    // Guard: only ever fire ONCE per page load. loadBatchFromHubSpot is also
+    // called by onScreeningComplete to refresh results — without this guard,
+    // a finished run reloads, sees unscreened contacts, and re-launches itself,
+    // creating an autostart→complete→reload→autostart loop (the 409 spin).
+    if (AUTOSTART && batchId === BATCH_ID && !window._autostartFired) {
       const unscreened = allContacts.filter((c, i) => !results[i] || results[i].status !== 'done').length;
       if (unscreened > 0) {
+        window._autostartFired = true;
         setTimeout(() => {
           const btn = document.getElementById('btnRun');
-          if (btn && !btn.disabled) {
-            console.log('[autostart] kicking off server screening for', unscreened, 'contacts');
+          if (btn && !btn.disabled && !activeJobId) {
+            console.log('[autostart] kicking off server screening for', unscreened, 'contacts (one-time)');
             startServerScreening();
           }
         }, 2000); // small delay to let UI settle
@@ -1268,7 +1280,7 @@ async function rollbackHubSpot() {
     const data = await resp.json();
     if (data.ok) {
       // Clear local state too
-      results = {}; overrides = {}; notes = {}; hookEdits = {};
+      results = {}; overrides = {}; notes = {}; hookEdits = {}; hookFeedback = {};
       // Clear persisted contact meta
       try { localStorage.removeItem('tl_contact_meta_' + BATCH_ID); } catch(e) {}
       // Remove from batch history
@@ -1355,6 +1367,7 @@ let results = {};
 let overrides = {};   // index -> true/false
 let notes = {};       // index -> string
 let hookEdits = {};   // index -> string (edited hook)
+let hookFeedback = {}; // index -> string (user feedback used to refine the hook)
 let isProcessing = false;
 let shouldStop = false;
 let currentFilter = 'all';
@@ -1449,16 +1462,18 @@ if (BATCH_ID) {
 // Load all persistent state on startup
 (async () => {
   try {
-    const [savedResults, savedOverrides, savedNotes, savedHooks] = await Promise.all([
+    const [savedResults, savedOverrides, savedNotes, savedHooks, savedHookFb] = await Promise.all([
       window.storage.get('screener_results').catch(()=>null),
       window.storage.get('screener_overrides').catch(()=>null),
       window.storage.get('screener_notes').catch(()=>null),
-      window.storage.get('screener_hooks').catch(()=>null)
+      window.storage.get('screener_hooks').catch(()=>null),
+      window.storage.get('screener_hook_feedback').catch(()=>null)
     ]);
     if (savedResults && savedResults.value) results = JSON.parse(savedResults.value);
     if (savedOverrides && savedOverrides.value) overrides = JSON.parse(savedOverrides.value);
     if (savedNotes && savedNotes.value) notes = JSON.parse(savedNotes.value);
     if (savedHooks && savedHooks.value) hookEdits = JSON.parse(savedHooks.value);
+    if (savedHookFb && savedHookFb.value) hookFeedback = JSON.parse(savedHookFb.value);
   } catch(e) {}
 
   // Load search selection and trigger label edits
@@ -1998,7 +2013,7 @@ async function clearResults() {
   await Promise.allSettled(keys.map(k => window.storage.delete(k)));
 
   // Clear all in-memory state
-  results = {}; overrides = {}; notes = {}; hookEdits = {};
+  results = {}; overrides = {}; notes = {}; hookEdits = {}; hookFeedback = {};
   personalCount = 0; standardCount = 0; processedCount = 0;
   isProcessing = false; shouldStop = false;
   l1Times = []; batchStartTime = null;
@@ -2463,6 +2478,13 @@ function startHookEdit(index) {
   }
 
   document.getElementById('hookEditModal').classList.add('open');
+
+  // Pre-fill any saved feedback for this contact; clear the status line
+  const fb = document.getElementById('hookModalFeedback');
+  if (fb) fb.value = (typeof hookFeedback !== 'undefined' && hookFeedback[index]) ? hookFeedback[index] : '';
+  const fbStatus = document.getElementById('hookModalFeedbackStatus');
+  if (fbStatus) fbStatus.textContent = '';
+
   setTimeout(() => { if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }, 100);
 }
 
@@ -2505,6 +2527,118 @@ async function regenerateHookModal() {
   // Update modal textarea with new hook
   const newHook = hookEdits[idx] || (results[idx] && results[idx].hook) || '';
   if (ta) ta.value = newHook;
+}
+
+async function saveHookFeedback() {
+  try { await window.storage.set('screener_hook_feedback', JSON.stringify(hookFeedback)); } catch(e) {}
+}
+
+// Rewrite the CURRENT hook using the user's plain-language feedback.
+// Works on any loaded contact (any batch), revising in place rather than
+// starting from scratch. Persists both the new hook and the feedback note.
+async function rewriteHookWithFeedback() {
+  if (_hookModalIndex === null) return;
+  const idx = _hookModalIndex;
+  const c = allContacts[idx];
+  const r = results[idx];
+  if (!c || !r) return;
+
+  const ta       = document.getElementById('hookModalTextarea');
+  const fbEl      = document.getElementById('hookModalFeedback');
+  const statusEl  = document.getElementById('hookModalFeedbackStatus');
+  const feedback  = (fbEl && fbEl.value.trim()) || '';
+
+  if (!feedback) {
+    if (statusEl) statusEl.textContent = 'Enter feedback first, then click Rewrite.';
+    if (fbEl) fbEl.focus();
+    return;
+  }
+
+  // Save the feedback note immediately so it persists even if the user closes early
+  hookFeedback[idx] = feedback;
+  saveHookFeedback();
+
+  const currentHook = (ta && ta.value.trim()) || hookEdits[idx] || (r.hook || '');
+  if (statusEl) statusEl.textContent = 'Rewriting…';
+  if (ta) { ta.value = 'Rewriting with your feedback…'; ta.disabled = true; }
+
+  try {
+    const profile = getProfileText();
+    const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || 'the owner';
+    const connections = (r.connections || []).map(cn => `- ${cn.type}: ${cn.description}`).join('\n') || 'No specific connections found';
+
+    const prompt = `You are revising a 2-sentence personal email opener ("hook") that Steven Pavlov will use to reach out to ${name} at ${c.company || 'their company'}.
+
+Steven's profile: ${profile}
+
+Known connections/context:
+${connections}
+
+Company: ${c.company || ''} | Industry: ${c.industry || ''} | Location: ${c.location || ''}
+
+CURRENT HOOK:
+"${currentHook || '(none written yet)'}"
+
+STEVEN'S FEEDBACK ON HOW TO CHANGE IT:
+"${feedback}"
+
+Revise the hook to incorporate Steven's feedback. Keep what works in the current version and change what the feedback asks for. Stay personal and specific, reference a real connection point if one exists, keep it warm and human, and do not mention acquisition directly. Aim for 2 sentences unless the feedback explicitly asks otherwise.
+
+Respond with ONLY the revised hook text. No explanation, no quotes, no preamble.`;
+
+    const resp = await fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': getAnthropicApiKey() },
+      body: JSON.stringify({
+        model: CONFIG.anthropicModel,
+        max_tokens: 300,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const data = await resp.json();
+
+    if (data && data.error) {
+      throw new Error(data.error.message || 'API error');
+    }
+    const newHook = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+
+    if (ta) ta.disabled = false;
+    if (newHook) {
+      if (ta) ta.value = newHook;
+      hookEdits[idx] = newHook;
+      if (results[idx]) results[idx].hook = newHook;
+      await saveHooks();
+      renderRow(idx);
+
+      // Persist new hook + feedback note to HubSpot. Feedback is appended to
+      // notes so it survives a reload from HubSpot on any future session.
+      if (c.hubspot_id && results[idx]) {
+        const baseNotes = (notes[idx] || '').replace(/\s*\[hook feedback:[^\]]*\]\s*$/i, '').trim();
+        const mergedNotes = baseNotes
+          ? `${baseNotes}  [hook feedback: ${feedback}]`
+          : `[hook feedback: ${feedback}]`;
+        autoSaveToHubSpot(c.hubspot_id, {
+          track:          overrides[idx] ? (overrides[idx]==='personal'?'Personal Outreach':'Standard Sequence') : r.track,
+          score:          r.score,
+          hook:           newHook,
+          recommendation: r.recommendation || '',
+          track_reason:   r.track_reason || '',
+          connections:    r.connections || [],
+          override:       !!overrides[idx],
+          override_note:  r._override_note || '',
+          notes:          mergedNotes
+        });
+      }
+      if (statusEl) statusEl.textContent = '✓ Rewritten — review above, then Save Hook';
+    } else {
+      if (ta) ta.value = currentHook;
+      if (statusEl) statusEl.textContent = 'No change returned — try rephrasing your feedback.';
+    }
+  } catch(e) {
+    if (ta) { ta.disabled = false; ta.value = currentHook; }
+    if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+    console.error('Hook feedback rewrite failed:', e);
+  }
 }
 // saveHook moved to saveHookModal
 
@@ -3128,7 +3262,7 @@ async function confirmImport(mode) {
 
   if (mode === 'replace') {
     // Clear all results/overrides/notes for old contacts
-    results = {}; overrides = {}; notes = {}; hookEdits = {};
+    results = {}; overrides = {}; notes = {}; hookEdits = {}; hookFeedback = {};
     personalCount = 0; standardCount = 0; processedCount = 0;
     l1Times = []; batchStartTime = null;
     const keys = ['screener_results','screener_overrides','screener_notes','screener_hooks'];
@@ -3801,6 +3935,17 @@ function getFullEmail(contact, result, index) {
     <div id="hookModalConnections" style="margin-bottom:12px;font-size:11px;color:var(--text-muted);background:var(--dark-3);border-radius:6px;padding:8px 12px;border:1px solid var(--border);display:none"></div>
     <textarea id="hookModalTextarea" style="width:100%;min-height:120px;background:var(--dark-3);color:var(--text);border:1px solid var(--gold);border-radius:6px;padding:12px;font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.7;resize:vertical;box-sizing:border-box" placeholder="Write a 2-sentence personal opener..."></textarea>
     <div style="font-size:11px;color:var(--text-muted);margin-top:6px">2 sentences. First establishes the connection. Second pivots to interest in the business.</div>
+
+    <!-- Feedback-guided rewrite -->
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+      <label style="display:block;font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:6px">Refine with your feedback</label>
+      <textarea id="hookModalFeedback" style="width:100%;min-height:52px;background:var(--dark-3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-family:'DM Sans',sans-serif;font-size:12px;line-height:1.5;resize:vertical;box-sizing:border-box" placeholder="Tell the AI how to change the hook — e.g. 'make it shorter', 'mention his Army background directly', 'less formal, more peer-to-peer'..."></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <button onclick="rewriteHookWithFeedback()" style="padding:8px 16px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.4);border-radius:6px;color:var(--gold);font-size:12px;font-weight:600;cursor:pointer">✎ Rewrite with feedback</button>
+        <span id="hookModalFeedbackStatus" style="font-size:11px;color:var(--text-muted)"></span>
+      </div>
+    </div>
+
     <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end">
       <button onclick="closeHookModal()" style="padding:9px 20px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:12px;cursor:pointer">Cancel</button>
       <button onclick="regenerateHookModal()" style="padding:9px 20px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:12px;cursor:pointer">⟳ Regenerate</button>
