@@ -278,7 +278,9 @@
     <button class="sort-btn" id="sortScoreBtn" onclick="toggleSort('score')">↓ Sort by Score</button>
     <button class="sort-btn" id="sortIndustryBtn" onclick="toggleSort('industry')">⊞ Cluster by Industry</button>
     <div class="spacer"></div>
-    <button class="export-btn" onclick="exportCSV()">↓ Export CSV</button>
+    <button class="export-btn" onclick="exportCSV()" title="Exports contacts matching the active filter (All, Personal Outreach, or Standard Sequence)">↓ Export CSV</button>
+    <button class="export-btn" onclick="exportTrackCSV('Personal Outreach')" style="color:var(--gold);border-color:rgba(201,168,76,0.3)" title="Export only Personal Outreach contacts">↓ Personal CSV</button>
+    <button class="export-btn" onclick="exportTrackCSV('Standard Sequence')" style="color:var(--green);border-color:rgba(76,175,125,0.3)" title="Export only Standard Sequence contacts">↓ Standard CSV</button>
     <button class="export-btn" onclick="exportExcel()" style="color:var(--green);border-color:rgba(76,175,125,0.3)" title="Export full results to Excel">↓ Export Excel</button>
     <button class="export-btn" onclick="triggerImport()" style="color:var(--gold);border-color:rgba(201,168,76,0.3)" title="Import contacts from a Grata CSV export">↑ Import CSV</button>
     <input type="file" id="csvFileInput" accept=".csv" style="display:none" onchange="handleCSVImport(event)">
@@ -3022,32 +3024,112 @@ function setFilter(filter, btn) {
 
 // ─── EXPORT CSV ───────────────────────────────────────────────
 
-function exportCSV() {
-  const headers = ['First Name','Last Name','Company','Location','Industry','Email','Track','Score','Connection Types','Hook','Notes','Confidence','Layer','Override'];
-  const rows = [headers];
-  const indices = getSortedIndices();
-  indices.forEach(i => {
-    const c = allContacts[i];
-    const r = results[i];
-    const hasOverride = !!overrides[i];
-    const effectiveTrack = hasOverride ? 'Personal Outreach (Override)' : (r ? (r.track||'Pending') : 'Pending');
-    const currentHook = hookEdits[i] || (r && r.hook) || '';
-    const conf = r ? getConfidence(c, r) : 0;
-    const confLabel = conf === 1 ? 'Low' : conf === 2 ? 'Medium' : conf === 3 ? 'High' : '';
-    const layer = r ? 'L1' : '';
-    rows.push([
-      c.firstName, c.lastName, c.company, c.location, c.industry, c.email,
-      effectiveTrack, r ? (r.score||0) : '',
-      r && r.connections ? r.connections.map(cn=>cn.type).join('; ') : '',
-      currentHook, notes[i]||''  , confLabel, layer, hasOverride ? 'Yes' : ''
-    ]);
-  });
-  const csv = rows.map(r => r.map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob = new Blob([csv], {type:'text/csv'});
+// ─── CSV EXPORT ───────────────────────────────────────────────
+// Columns requested by the user (exact order):
+// First Name, Last Name, Company, Title, Location, Industry, Email, LinkedIn, Score, Hook, Connections, Notes
+const EXPORT_HEADERS = ['First Name','Last Name','Company','Title','Location','Industry','Email','LinkedIn','Score','Hook','Connections','Notes'];
+
+function _exportRowFor(i) {
+  const c = allContacts[i];
+  const r = results[i];
+  const currentHook = hookEdits[i] || (r && r.hook) || '';
+  const connections = r && r.connections ? r.connections.map(cn => cn.type).filter(Boolean).join('; ') : '';
+  return [
+    c.firstName || '',
+    c.lastName || '',
+    c.company || '',
+    c.jobTitle || '',
+    c.location || '',
+    c.industry || '',
+    c.email || '',
+    c.linkedin || '',
+    r ? (r.score != null ? r.score : '') : '',
+    currentHook,
+    connections,
+    notes[i] || ''
+  ];
+}
+
+// Effective track for a contact, honoring overrides
+function _effectiveTrack(i) {
+  const r = results[i];
+  if (!r || r.status !== 'done') return null;
+  if (overrides[i]) return overrides[i] === 'personal' ? 'Personal Outreach' : 'Standard Sequence';
+  return r.track || null;
+}
+
+// Build a filename from the batch ID with a track suffix, mirroring batch nomenclature.
+// e.g. GRATA-..._BATCH_2a-20260522-095613_personal_outreach.csv
+function _exportFilename(track) {
+  const base = BATCH_ID && BATCH_ID.trim() ? BATCH_ID.trim() : 'toluca_lake_screened_contacts';
+  let suffix = '';
+  if (track === 'Personal Outreach') suffix = '_personal_outreach';
+  else if (track === 'Standard Sequence') suffix = '_standard_sequence';
+  else if (track === 'all_filtered') suffix = '_filtered';
+  return base + suffix + '.csv';
+}
+
+function _downloadCSV(rows, filename) {
+  const csv = rows.map(r => r.map(v => `"${String(v == null ? '' : v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url;
-  a.download = 'toluca_lake_screened_contacts.csv'; a.click();
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Main Export CSV button — respects the active on-screen filter.
+// If the Personal Outreach or Standard Sequence filter is active, only those export,
+// and the filename gets the matching track suffix.
+function exportCSV() {
+  const indices = getSortedIndices();
+  const rows = [EXPORT_HEADERS];
+  let exported = 0;
+
+  // Decide track filter + filename from the active filter pill
+  let trackFilter = null;       // null = no track restriction
+  let filenameTrack = null;     // drives the filename suffix
+  if (currentFilter === 'Personal Outreach') { trackFilter = 'Personal Outreach'; filenameTrack = 'Personal Outreach'; }
+  else if (currentFilter === 'Standard Sequence') { trackFilter = 'Standard Sequence'; filenameTrack = 'Standard Sequence'; }
+  else if (currentFilter !== 'all') { filenameTrack = 'all_filtered'; } // pending / overrides → mark as filtered
+
+  indices.forEach(i => {
+    const r = results[i];
+    if (!r || r.status !== 'done') {
+      // Only include unscreened rows when no filter is narrowing to a track
+      if (currentFilter === 'pending') { rows.push(_exportRowFor(i)); exported++; }
+      return;
+    }
+    const eff = _effectiveTrack(i);
+    if (trackFilter && eff !== trackFilter) return;
+    if (currentFilter === 'overrides' && !overrides[i] && !(notes[i] && notes[i].trim())) return;
+    rows.push(_exportRowFor(i));
+    exported++;
+  });
+
+  if (exported === 0) {
+    showAlert('No contacts match the current filter to export.');
+    return;
+  }
+  _downloadCSV(rows, _exportFilename(filenameTrack));
+}
+
+// Explicit per-track export (Personal CSV / Standard CSV buttons).
+// Always exports that track regardless of the active filter.
+function exportTrackCSV(track) {
+  const indices = getSortedIndices();
+  const rows = [EXPORT_HEADERS];
+  let exported = 0;
+  indices.forEach(i => {
+    if (_effectiveTrack(i) === track) { rows.push(_exportRowFor(i)); exported++; }
+  });
+  if (exported === 0) {
+    showAlert(`No ${track} contacts to export. Run the screener first.`);
+    return;
+  }
+  _downloadCSV(rows, _exportFilename(track));
 }
 
 // ─── EXCEL EXPORT ─────────────────────────────────────────────
