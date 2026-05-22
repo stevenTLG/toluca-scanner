@@ -469,9 +469,49 @@ async function startServerScreening() {
     });
     const data = await resp.json();
 
-    // 409 = job already running for this batch — reconnect to it instead of erroring
+    // 409 = a job already exists for this batch. If it's genuinely alive (fresh
+    // heartbeat), reconnect to it. If it's stale (dead thread from a dyno restart —
+    // the bug that caused the endless "reconnecting" loop), force-kill it and start fresh.
     if (resp.status === 409 && data.job_id) {
-      console.log('[Screener] 409 — reconnecting to existing job', data.job_id);
+      const hbAge = typeof data.hb_age === 'number' ? data.hb_age : 999;
+      if (hbAge > 30) {
+        console.log('[Screener] 409 but job', data.job_id, 'is stale (hb_age=' + hbAge + 's) — force-starting fresh');
+        document.getElementById('server-progress-label').textContent = 'Clearing stuck job — starting fresh...';
+        try {
+          const forceResp = await fetch('/api/screen-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ batch_id: BATCH_ID, criteria: buildCriteriaPayload(), force: true })
+          });
+          const forceData = await forceResp.json();
+          if (forceResp.ok && forceData.job_id) {
+            activeJobId = forceData.job_id;
+            try {
+              await window.storage.set('active_job_' + BATCH_ID, JSON.stringify({
+                job_id: activeJobId, started: new Date().toISOString(), total: forceData.total
+              }));
+            } catch(e) {}
+            btn.textContent = '⏳ Screening...';
+            document.getElementById('server-progress-label').textContent =
+              `${forceData.already_screened} already screened — ${forceData.total} to process`;
+            isPaused = false;
+            _showPauseBtn();
+            startPolling();
+            return;
+          }
+          // Force-start failed — surface the error
+          btn.disabled = false;
+          btn.textContent = '▶ Run Screener';
+          await showAlert(forceData.error || 'Could not clear the stuck job. Wait ~90 seconds and try again.');
+          return;
+        } catch(e) {
+          btn.disabled = false;
+          btn.textContent = '▶ Run Screener';
+          await showAlert('Network error clearing stuck job: ' + e.message);
+          return;
+        }
+      }
+      console.log('[Screener] 409 — job', data.job_id, 'is alive (hb_age=' + hbAge + 's), reconnecting');
       activeJobId = data.job_id;
       btn.textContent = '⏳ Screening...';
       document.getElementById('server-progress-label').textContent = 'Reconnecting to running job...';
@@ -550,6 +590,21 @@ async function pollJobStatus() {
     if (job.done) {
       stopPolling();
       onScreeningComplete(job);
+      return;
+    }
+
+    // Job died mid-run (dyno restart). Stop polling and let the user restart —
+    // no point spinning forever on a thread that's gone.
+    if (job.dead || (typeof job.hb_age === 'number' && job.hb_age > 90)) {
+      console.log('[pollJobStatus] Active job', activeJobId, 'went dead (hb_age=' + job.hb_age + 's) — stopping');
+      stopPolling();
+      activeJobId = null;
+      try { await window.storage.delete('active_job_' + BATCH_ID); } catch(e) {}
+      _hidePauseBtn();
+      const btn = document.getElementById('btnRun');
+      if (btn) { btn.disabled = false; btn.textContent = '▶ Run Screener'; }
+      document.getElementById('server-progress-label').textContent = 'Screening stopped unexpectedly — click Run Screener to resume.';
+      document.getElementById('controlDesc').textContent = 'The job stopped (server restarted). Click Run Screener to continue from where it left off.';
     }
   } catch(e) {}
 }
@@ -641,7 +696,16 @@ async function reconnectJob() {
       return;
     }
 
-    // Job still running — reconnect
+    // Dead job: the record survived but its worker thread is gone (dyno restart).
+    // This is the bug that caused the endless "reconnecting" loop. Clear it and
+    // let autostart begin a fresh run instead of reconnecting to a corpse.
+    if (job.dead || (typeof job.hb_age === 'number' && job.hb_age > 90)) {
+      console.log('[reconnectJob] Job', saved.job_id, 'is dead (hb_age=' + job.hb_age + 's) — clearing, will start fresh');
+      await window.storage.delete('active_job_' + BATCH_ID).catch(()=>{});
+      return;
+    }
+
+    // Job genuinely running — reconnect
     activeJobId = saved.job_id;
     const btn = document.getElementById('btnRun');
     btn.disabled = true;
