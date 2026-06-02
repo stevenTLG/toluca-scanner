@@ -18,6 +18,31 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # every API call to fail, which is why the screener "completed" with 0 results.
 SCREENING_MODEL = os.environ.get('SCREENING_MODEL', 'claude-sonnet-4-6')
 
+# ─── HOOK GENERATION RULES ────────────────────────────────────────────────────
+# Controls the {{hook}} text the model writes for Personal Outreach contacts.
+# Reply.io drops the hook into this exact template:
+#
+#   Hi {{FirstName}}, {{hook}} {{Random|'I am currently in the process of'
+#   |'I am in the process of'}} acquiring one small business for long-term
+#   ownership. {{Random|'Would you be open to a quick conversation?'
+#   |'Are you open to a brief call?'|'Would a 15-minute call make sense?'}}
+#
+# So the model writes ONLY the middle personalized bridge. Keep a single space
+# on each side of {{hook}} in the Reply.io template so sentences don't collide.
+# Edit, add, or delete any numbered rule below; it flows straight into the
+# screening prompt with no other code changes needed.
+HOOK_RULES = """HOOK RULES (write ONLY the text that replaces {{hook}}, nothing else):
+1. The greeting and first name are already handled by "Hi {FirstName},". Do NOT greet and do NOT use the recipient's name.
+2. The very next sentence already states the intent to acquire one small business for long-term ownership. Do NOT mention buying, acquiring, a search, a fund, or any intent. The hook is only the personalized bridge that leads into that sentence.
+3. The closing line already asks for a call. Do NOT propose a call, a meeting, a conversation, or "connecting".
+4. Do NOT name Toluca Lake Group, or any company, fund, or entity, for the sender.
+5. Do NOT use dashes or em dashes of any kind ( - , -- , en dash, em dash ). Use commas instead.
+6. Do NOT mention being Ranger qualified, or any specific military school, tab, course, award, or qualification. General veteran or Army rapport is acceptable ONLY when the owner clearly shares that background and it reads naturally.
+7. Tie in the sender's background ONLY where there is a genuine, specific overlap with this recipient: shared Sacramento or California roots, an immigrant or first generation story, military or veteran service, a bootstrapped or built from nothing origin, public sector roots, endurance athletics, or a long tenured loyal workforce. Do NOT force or stretch a connection. If nothing genuinely overlaps, write a concrete, respectful line about the recipient's business alone.
+8. Be specific and verifiable. Reference something real (years in business, the region served, a niche, a recognizable detail). Avoid generic flattery such as "impressive company" or "great work".
+9. Tone: warm, plain, peer to peer, human. No buzzwords, no superlatives, no salesy language.
+10. Format: 1 to 2 sentences. Start with a capital letter, end with a period, and return NO leading or trailing spaces. Plain text only."""
+
 @app.after_request
 def allow_iframe(response):
     response.headers['X-Frame-Options'] = 'ALLOWALL'
@@ -221,7 +246,7 @@ Contact:
 - Founded: {contact.get('founded', '')}
 
 Respond ONLY with raw JSON (no markdown):
-{{"score":<0-100>,"track":"Personal Outreach" or "Standard Sequence","track_reason":"<1 sentence>","connections":[{{"strength":"strong|moderate|weak","basis":"confirmed|inferred","type":"","description":"","sourceUrl":""}}],"recommendation":"<1-2 sentences>","hook":"<2 sentence opener if Personal Outreach, else empty string>","industryCluster":"<1-3 word group>"}}
+{{"score":<0-100>,"track":"Personal Outreach" or "Standard Sequence","track_reason":"<1 sentence>","connections":[{{"strength":"strong|moderate|weak","basis":"confirmed|inferred","type":"","description":"","sourceUrl":""}}],"recommendation":"<1-2 sentences>","hook":"<if Personal Outreach: the hook text following the HOOK RULES below. If Standard Sequence: empty string>","industryCluster":"<1-3 word group>"}}
 
 Rules: score>{threshold} = Personal Outreach. basis="confirmed" means direct evidence found; "inferred" means reasoning from signals. Only include real connection points. Never hallucinate URLs.
 
@@ -233,7 +258,9 @@ Run web searches before scoring:
 1. "{name} {contact.get('company', '')}" — general background and owner bio
 {search2_line}
 
-Pay special attention to: California roots (Sacramento, Antelope Valley, San Fernando Valley), military/veteran background, immigrant background, bootstrapped origin story."""
+Pay special attention to: California roots (Sacramento, Antelope Valley, San Fernando Valley), military/veteran background, immigrant background, bootstrapped origin story.
+
+{HOOK_RULES}"""
     return prompt, has_full
 
 def _parse_result(text):
