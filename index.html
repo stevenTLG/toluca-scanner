@@ -388,6 +388,31 @@ const PROFILE_DEFAULTS = {
 };
 let profileCache = { ...PROFILE_DEFAULTS };
 
+// ─── HOOK GENERATION RULES ───────────────────────────────────────────────────
+// Controls the {{hook}} text the model writes for Personal Outreach contacts.
+// Reply.io drops the hook into this exact template:
+//
+//   Hi {{FirstName}}, {{hook}} {{Random|'I am currently in the process of'
+//   |'I am in the process of'}} acquiring one small business for long-term
+//   ownership. {{Random|'Would you be open to a quick conversation?'
+//   |'Are you open to a brief call?'|'Would a 15-minute call make sense?'}}
+//
+// So the model writes ONLY the middle personalized bridge. Keep a single space
+// on each side of {{hook}} in the Reply.io template so sentences don't collide.
+// Edit, add, or delete any numbered rule below; it flows straight into the
+// screening prompt. Keep this list identical to HOOK_RULES in app.py.
+const HOOK_RULES = `HOOK RULES (write ONLY the text that replaces {{hook}}, nothing else):
+1. The greeting and first name are already handled by "Hi {FirstName},". Do NOT greet and do NOT use the recipient's name.
+2. The very next sentence already states the intent to acquire one small business for long-term ownership. Do NOT mention buying, acquiring, a search, a fund, or any intent. The hook is only the personalized bridge that leads into that sentence.
+3. The closing line already asks for a call. Do NOT propose a call, a meeting, a conversation, or "connecting".
+4. Do NOT name Toluca Lake Group, or any company, fund, or entity, for the sender.
+5. Do NOT use dashes or em dashes of any kind ( - , -- , en dash, em dash ). Use commas instead.
+6. Do NOT mention being Ranger qualified, or any specific military school, tab, course, award, or qualification. General veteran or Army rapport is acceptable ONLY when the owner clearly shares that background and it reads naturally.
+7. Tie in the sender's background ONLY where there is a genuine, specific overlap with this recipient: shared Sacramento or California roots, an immigrant or first generation story, military or veteran service, a bootstrapped or built from nothing origin, public sector roots, endurance athletics, or a long tenured loyal workforce. Do NOT force or stretch a connection. If nothing genuinely overlaps, write a concrete, respectful line about the recipient's business alone.
+8. Be specific and verifiable. Reference something real (years in business, the region served, a niche, a recognizable detail). Avoid generic flattery such as "impressive company" or "great work".
+9. Tone: warm, plain, peer to peer, human. No buzzwords, no superlatives, no salesy language.
+10. Format: 1 to 2 sentences. Start with a capital letter, end with a period, and return NO leading or trailing spaces. Plain text only.`;
+
 // ─── SERVER-SIDE SCREENING ───────────────────────────────────────────────────
 let activeJobId   = null;
 let pollInterval  = null;
@@ -1110,7 +1135,7 @@ function heuristicScreen(contact) {
     track: score > threshold ? 'Personal Outreach' : 'Standard Sequence',
     connections: reasons.slice(0, 4),
     recommendation: 'Heuristic mode only. Add an Anthropic API key to enable live AI scoring and web-backed connection analysis.',
-    hook: score > threshold ? `I came across ${escapeHtml(company)} and liked the compliance-heavy positioning in fire protection. I am building Toluca Lake Group around durable service businesses and thought it might make sense to introduce myself.` : '',
+    hook: score > threshold ? `Your work building ${escapeHtml(company)} into a lasting operation in your field stands out, and the kind of business that gets built carefully over years is exactly what I pay attention to.` : '',
     industryCluster: /fire|safety|suppression|sprinkler/i.test(company + ' ' + description) ? 'Fire Protection' : (contact.industry || 'Other')
   };
 }
@@ -1735,7 +1760,7 @@ Contact:
 - Founded: ${contact.founded}
 
 Respond ONLY with raw JSON (no markdown):
-{"score":<0-100>,"track":"Personal Outreach" or "Standard Sequence","track_reason":"<1 sentence  -  the single most decisive factor in the track decision>","connections":[{"strength":"strong" or "moderate" or "weak","basis":"confirmed" or "inferred","type":"<short category>","description":"<one sentence>","sourceUrl":"<exact URL where you found this fact, or empty string if not from a specific web page>"}],"recommendation":"<1-2 sentences>","hook":"<if Personal Outreach: 2 sentence personal opening for Steven's email. If Standard Sequence: empty string>","industryCluster":"<1-3 word industry group e.g. Fire Protection, HVAC, Safety Consulting, Security Systems>"}
+{"score":<0-100>,"track":"Personal Outreach" or "Standard Sequence","track_reason":"<1 sentence  -  the single most decisive factor in the track decision>","connections":[{"strength":"strong" or "moderate" or "weak","basis":"confirmed" or "inferred","type":"<short category>","description":"<one sentence>","sourceUrl":"<exact URL where you found this fact, or empty string if not from a specific web page>"}],"recommendation":"<1-2 sentences>","hook":"<if Personal Outreach: the hook text following the HOOK RULES below. If Standard Sequence: empty string>","industryCluster":"<1-3 word industry group e.g. Fire Protection, HVAC, Safety Consulting, Security Systems>"}
 
 Rules: score>${getCriteriaThreshold()} = Personal Outreach. Only include real connection points. basis="confirmed" means you found direct evidence; basis="inferred" means you are reasoning from indirect signals. For sourceUrl: only include a URL if you found the fact on a specific web page during this search session  -  never guess or hallucinate URLs.
 
@@ -1747,7 +1772,9 @@ If web search available, run searches before scoring (keep it fast):
 1. "[owner name] [company name]"  -  general background, company story, owner bio
 ${hasFullName ? `2. "[owner name] [company name] ${getSearch2Terms()}"  -  targeted at personal connection signals. Only run this if you have both first AND last name for the owner.` : '(Search 2 skipped  -  no full owner name available. Score on what you find in search 1 and the Grata data.)'}
 
-Pay special attention to signals matching the connection triggers above. Also note: California roots (Sacramento, Antelope Valley, San Fernando Valley) are always relevant to Steven.`;
+Pay special attention to signals matching the connection triggers above. Also note: California roots (Sacramento, Antelope Valley, San Fernando Valley) are always relevant to Steven.
+
+${HOOK_RULES}`;
 
   const apiKey = await ensureApiKey();
   if (!apiKey) {
