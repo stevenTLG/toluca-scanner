@@ -407,8 +407,8 @@ const HOOK_RULES = `HOOK RULES (write ONLY the text that replaces {{hook}}, noth
 3. The closing line already asks for a call. Do NOT propose a call, a meeting, a conversation, or "connecting".
 4. Do NOT name Toluca Lake Group, or any company, fund, or entity, for the sender.
 5. Do NOT use dashes or em dashes of any kind ( - , -- , en dash, em dash ). Use commas instead.
-6. Do NOT mention being Ranger qualified, or any specific military school, tab, course, award, or qualification. General veteran or Army rapport is acceptable ONLY when the owner clearly shares that background and it reads naturally.
-7. Tie in the sender's background ONLY where there is a genuine, specific overlap with this recipient: shared Sacramento or California roots, an immigrant or first generation story, military or veteran service, a bootstrapped or built from nothing origin, public sector roots, endurance athletics, or a long tenured loyal workforce. Do NOT force or stretch a connection. If nothing genuinely overlaps, write a concrete, respectful line about the recipient's business alone.
+6. Do NOT reference the sender's military or veteran service, Army or infantry background, Ranger qualification, deployments, or the sender's CFO, finance, or public agency role anywhere in the hook. The email body already states that the sender is an Army veteran and a California public agency CFO, so any of this in the hook is duplication. Do NOT frame a shared veteran to veteran or shared finance or public sector bond either, for the same reason. The body carries that identity and will resonate with veteran or public sector owners on its own.
+7. Tie in the sender's background ONLY where there is a genuine, specific overlap with this recipient: shared Sacramento or California roots, an immigrant or first generation story, a bootstrapped or built from nothing origin, endurance athletics, or a long tenured loyal workforce. Do NOT use military, veteran, CFO, finance, or public sector overlap as the tie in, even when the recipient clearly shares it, since the body already covers the sender's veteran and CFO identity. Do NOT force or stretch a connection. If nothing genuinely overlaps, write a concrete, respectful line about the recipient's business alone.
 8. Be specific and verifiable. Reference something real (years in business, the region served, a niche, a recognizable detail). Avoid generic flattery such as "impressive company" or "great work".
 9. Tone: warm, plain, peer to peer, human. No buzzwords, no superlatives, no salesy language.
 10. Format: 1 to 2 sentences. Start with a capital letter, end with a period, and return NO leading or trailing spaces. Plain text only.`;
@@ -3943,7 +3943,7 @@ function previewSampleEmail() {
   const subj = document.getElementById('emailSubject').value;
   const body = document.getElementById('emailBody').value;
   const sampleContact = { firstName: 'Henry', lastName: 'Hernandez', company: 'Veteran Fire Protection' };
-  const sampleHook = 'I noticed that Veteran Fire Protection was founded by a U.S. Army veteran — as a Ranger-qualified Infantry Officer myself, that shared background stood out immediately.';
+  const sampleHook = 'I came across Veteran Fire Protection while researching established Sacramento-area operators, and what you have built over the past two decades, growing it from the ground up into a name the region trusts, is exactly the kind of story that stays with me.';
   const mergedSubj = mergeEmail(subj, sampleContact, sampleHook, 'Personal Outreach');
   const mergedBody = mergeEmail(body, sampleContact, sampleHook, 'Personal Outreach');
   document.getElementById('previewSubject').textContent = mergedSubj;
