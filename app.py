@@ -19,29 +19,42 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 SCREENING_MODEL = os.environ.get('SCREENING_MODEL', 'claude-sonnet-4-6')
 
 # ─── HOOK GENERATION RULES ────────────────────────────────────────────────────
-# Controls the {{hook}} text the model writes for Personal Outreach contacts.
-# Reply.io drops the hook into this exact template:
+# Controls the {{hook}} text the model writes for Step 1 of BOTH the Personal
+# and Standard sequences. Step 1 is identical across both sequences, so a single
+# hook (same rules, same parameters) serves both tracks. Reply.io places {{hook}}
+# as its OWN paragraph, right after the greeting and right before the body:
 #
-#   Hi {{FirstName}}, {{hook}} {{Random|'I am currently in the process of'
-#   |'I am in the process of'}} acquiring one small business for long-term
-#   ownership. {{Random|'Would you be open to a quick conversation?'
-#   |'Are you open to a brief call?'|'Would a 15-minute call make sense?'}}
+#   Subject: An Army veteran hoping to learn about your business
 #
-# So the model writes ONLY the middle personalized bridge. Keep a single space
-# on each side of {{hook}} in the Reply.io template so sentences don't collide.
-# Edit, add, or delete any numbered rule below; it flows straight into the
-# screening prompt with no other code changes needed.
+#   Hi {{FirstName}},
+#
+#   {{hook}}
+#
+#   I am looking to buy one company to own and operate for the next 20+ years.
+#   I am not a financial buyer or private equity.
+#
+#   By way of background, I am an Army veteran and currently CFO of a large
+#   California public agency ...
+#
+#   I would appreciate 15 to 20 minutes to hear how you built {{Company}}.
+#
+# So the hook is the OPENING line of the email. It has to earn attention on its
+# own and hand off cleanly into "I am looking to buy one company ...". Step 1 is
+# already long, so the hook must stay short and must not repeat anything the body
+# already says. Keep one space on each side of {{hook}} in the Reply.io template
+# so the paragraphs don't collide. Edit, add, or delete any numbered rule below;
+# it flows straight into the screening prompt with no other code changes needed.
 HOOK_RULES = """HOOK RULES (write ONLY the text that replaces {{hook}}, nothing else):
-1. The greeting and first name are already handled by "Hi {FirstName},". Do NOT greet and do NOT use the recipient's name.
-2. The very next sentence already states the intent to acquire one small business for long-term ownership. Do NOT mention buying, acquiring, a search, a fund, or any intent. The hook is only the personalized bridge that leads into that sentence.
-3. The closing line already asks for a call. Do NOT propose a call, a meeting, a conversation, or "connecting".
+1. Position: the hook is the FIRST line of the email, right after "Hi {FirstName},". It must grab attention in a single read and lead naturally into the next paragraph, which begins "I am looking to buy one company to own and operate for the next 20+ years." Do NOT greet and do NOT use the recipient's name.
+2. Length: keep it tight, because the rest of Step 1 is already long. Default to one or two sentences. If there is a particularly strong, specific connection that needs the room, you may use a third sentence, use your best judgment. Never pad, and never more than three sentences.
+3. No duplication with the rest of Step 1. The body already covers all of the following about the SENDER, so the hook must NOT state them: the intent to buy, acquire, or search for a company; owning and operating for the long term or for "20+ years"; being a long-term operator rather than a financial buyer or private equity; the sender's own Army veteran service; the sender's own role as a CFO of a California public agency; and the closing request for 15 to 20 minutes or to hear how they built the company. Do NOT propose a call, a meeting, a conversation, or "connecting" anywhere in the hook. (How to handle the RECIPIENT's background, including any overlap with the sender, is governed by rules 6 and 7.)
 4. Do NOT name Toluca Lake Group, or any company, fund, or entity, for the sender.
 5. Do NOT use dashes or em dashes of any kind ( - , -- , en dash, em dash ). Use commas instead.
-6. Do NOT reference the sender's military or veteran service, Army or infantry background, Ranger qualification, deployments, or the sender's CFO, finance, or public agency role anywhere in the hook. The email body already states that the sender is an Army veteran and a California public agency CFO, so any of this in the hook is duplication. Do NOT frame a shared veteran to veteran or shared finance or public sector bond either, for the same reason. The body carries that identity and will resonate with veteran or public sector owners on its own.
-7. Tie in the sender's background ONLY where there is a genuine, specific overlap with this recipient: shared Sacramento or California roots, an immigrant or first generation story, a bootstrapped or built from nothing origin, endurance athletics, or a long tenured loyal workforce. Do NOT use military, veteran, CFO, finance, or public sector overlap as the tie in, even when the recipient clearly shares it, since the body already covers the sender's veteran and CFO identity. Do NOT force or stretch a connection. If nothing genuinely overlaps, write a concrete, respectful line about the recipient's business alone.
-8. Be specific and verifiable. Reference something real (years in business, the region served, a niche, a recognizable detail). Avoid generic flattery such as "impressive company" or "great work".
-9. Tone: warm, plain, peer to peer, human. No buzzwords, no superlatives, no salesy language.
-10. Format: 1 to 2 sentences. Start with a capital letter, end with a period, and return NO leading or trailing spaces. Plain text only."""
+6. You MAY reference the recipient's own background, even where it overlaps with the sender's, but do NOT state the sender's matching trait or claim the shared bond directly. The body already reveals that the sender is an Army veteran and a California public agency CFO, so for any military, veteran, finance, or public sector overlap, never write the connection from the sender's side. Forbidden examples: "I too am a veteran", "as a fellow veteran", "I also spent my career in public service", "we share a public sector background". You may instead note the recipient's own service or public sector background as a fact about them, and let the body do the connecting, since the reader will infer the shared ground on their own.
+7. For genuine overlaps the body does NOT mention, you MAY draw the connection directly. The body covers only the sender's veteran service and public agency CFO role, nothing else about the sender. So other real overlaps the scanner identified, for example shared Sacramento or California roots, an immigrant or first generation story, a bootstrapped or built from nothing origin, endurance athletics, education, or a single parent upbringing, are fair to name directly in the hook, since the body will not surface them. Use only real, scanner identified overlaps. Do NOT force or stretch a connection. If nothing genuinely overlaps, write a concrete, respectful line about the recipient's business alone.
+8. Be specific and verifiable. Open on something real about the recipient or the company (years in business, the region served, a niche, a recognizable detail) so the line could only have been written to this owner. Avoid generic flattery such as "impressive company" or "great work".
+9. Tone: warm, plain, peer to peer, human, one future owner introducing himself to another. Match the voice of the email body. No buzzwords, no superlatives, no salesy language.
+10. Format: start with a capital letter, end with a period, and return NO leading or trailing spaces. Plain text only."""
 
 @app.after_request
 def allow_iframe(response):
@@ -217,6 +230,9 @@ def _build_prompt(contact, criteria):
     weights = criteria.get('weights', [])
     feedback = criteria.get('feedback', [])
     search2_terms = criteria.get('search2_terms', '')
+    # Hook rules are editable from the Criteria page and arrive in the payload.
+    # The HOOK_RULES constant above is only the default seed / fallback.
+    hook_rules = (criteria.get('hook_rules') or '').strip() or HOOK_RULES
     wlabels = ['', 'Low', 'Medium', 'High']
     weights_text = '\n'.join(
         f"- {w['label']}: {wlabels[min(w.get('weight', 1), 3)]}"
@@ -246,7 +262,7 @@ Contact:
 - Founded: {contact.get('founded', '')}
 
 Respond ONLY with raw JSON (no markdown):
-{{"score":<0-100>,"track":"Personal Outreach" or "Standard Sequence","track_reason":"<1 sentence>","connections":[{{"strength":"strong|moderate|weak","basis":"confirmed|inferred","type":"","description":"","sourceUrl":""}}],"recommendation":"<1-2 sentences>","hook":"<if Personal Outreach: the hook text following the HOOK RULES below. If Standard Sequence: empty string>","industryCluster":"<1-3 word group>"}}
+{{"score":<0-100>,"track":"Personal Outreach" or "Standard Sequence","track_reason":"<1 sentence>","connections":[{{"strength":"strong|moderate|weak","basis":"confirmed|inferred","type":"","description":"","sourceUrl":""}}],"recommendation":"<1-2 sentences>","hook":"<ALWAYS write a hook for every contact, regardless of track. Follow the HOOK RULES below. Step 1 is identical for Personal Outreach and Standard Sequence, so the same hook applies to both>","industryCluster":"<1-3 word group>"}}
 
 Rules: score>{threshold} = Personal Outreach. basis="confirmed" means direct evidence found; "inferred" means reasoning from signals. Only include real connection points. Never hallucinate URLs.
 
@@ -260,7 +276,7 @@ Run web searches before scoring:
 
 Pay special attention to: California roots (Sacramento, Antelope Valley, San Fernando Valley), military/veteran background, immigrant background, bootstrapped origin story.
 
-{HOOK_RULES}"""
+{hook_rules}"""
     return prompt, has_full
 
 def _parse_result(text):
