@@ -389,29 +389,52 @@ const PROFILE_DEFAULTS = {
 let profileCache = { ...PROFILE_DEFAULTS };
 
 // ─── HOOK GENERATION RULES ───────────────────────────────────────────────────
-// Controls the {{hook}} text the model writes for Personal Outreach contacts.
-// Reply.io drops the hook into this exact template:
+// Controls the {{hook}} text the model writes for Step 1 of BOTH the Personal
+// and Standard sequences. Step 1 is identical across both, so one hook (same
+// rules, same parameters) serves both tracks. Reply.io places {{hook}} as its
+// OWN paragraph, right after the greeting and right before the body:
 //
-//   Hi {{FirstName}}, {{hook}} {{Random|'I am currently in the process of'
-//   |'I am in the process of'}} acquiring one small business for long-term
-//   ownership. {{Random|'Would you be open to a quick conversation?'
-//   |'Are you open to a brief call?'|'Would a 15-minute call make sense?'}}
+//   Hi {{FirstName}},
 //
-// So the model writes ONLY the middle personalized bridge. Keep a single space
-// on each side of {{hook}} in the Reply.io template so sentences don't collide.
-// Edit, add, or delete any numbered rule below; it flows straight into the
-// screening prompt. Keep this list identical to HOOK_RULES in app.py.
+//   {{hook}}
+//
+//   I am looking to buy one company to own and operate for the next 20+ years.
+//   I am not a financial buyer or private equity.
+//   ... (Army veteran / CFO background paragraph) ...
+//   I would appreciate 15 to 20 minutes to hear how you built {{Company}}.
+//
+// So the hook is the OPENING line of the email: it must earn attention on its
+// own, hand off into "I am looking to buy one company ...", stay short (Step 1
+// is already long), and never repeat anything the body says. Keep one space on
+// each side of {{hook}} in the Reply.io template so the paragraphs don't collide.
+// Keep this list identical to HOOK_RULES in app.py.
 const HOOK_RULES = `HOOK RULES (write ONLY the text that replaces {{hook}}, nothing else):
-1. The greeting and first name are already handled by "Hi {FirstName},". Do NOT greet and do NOT use the recipient's name.
-2. The very next sentence already states the intent to acquire one small business for long-term ownership. Do NOT mention buying, acquiring, a search, a fund, or any intent. The hook is only the personalized bridge that leads into that sentence.
-3. The closing line already asks for a call. Do NOT propose a call, a meeting, a conversation, or "connecting".
+1. Position: the hook is the FIRST line of the email, right after "Hi {FirstName},". It must grab attention in a single read and lead naturally into the next paragraph, which begins "I am looking to buy one company to own and operate for the next 20+ years." Do NOT greet and do NOT use the recipient's name.
+2. Length: keep it tight, because the rest of Step 1 is already long. Default to one or two sentences. If there is a particularly strong, specific connection that needs the room, you may use a third sentence, use your best judgment. Never pad, and never more than three sentences.
+3. No duplication with the rest of Step 1. The body already covers all of the following about the SENDER, so the hook must NOT state them: the intent to buy, acquire, or search for a company; owning and operating for the long term or for "20+ years"; being a long-term operator rather than a financial buyer or private equity; the sender's own Army veteran service; the sender's own role as a CFO of a California public agency; and the closing request for 15 to 20 minutes or to hear how they built the company. Do NOT propose a call, a meeting, a conversation, or "connecting" anywhere in the hook. (How to handle the RECIPIENT's background, including any overlap with the sender, is governed by rules 6 and 7.)
 4. Do NOT name Toluca Lake Group, or any company, fund, or entity, for the sender.
 5. Do NOT use dashes or em dashes of any kind ( - , -- , en dash, em dash ). Use commas instead.
-6. Do NOT reference the sender's military or veteran service, Army or infantry background, Ranger qualification, deployments, or the sender's CFO, finance, or public agency role anywhere in the hook. The email body already states that the sender is an Army veteran and a California public agency CFO, so any of this in the hook is duplication. Do NOT frame a shared veteran to veteran or shared finance or public sector bond either, for the same reason. The body carries that identity and will resonate with veteran or public sector owners on its own.
-7. Tie in the sender's background ONLY where there is a genuine, specific overlap with this recipient: shared Sacramento or California roots, an immigrant or first generation story, a bootstrapped or built from nothing origin, endurance athletics, or a long tenured loyal workforce. Do NOT use military, veteran, CFO, finance, or public sector overlap as the tie in, even when the recipient clearly shares it, since the body already covers the sender's veteran and CFO identity. Do NOT force or stretch a connection. If nothing genuinely overlaps, write a concrete, respectful line about the recipient's business alone.
-8. Be specific and verifiable. Reference something real (years in business, the region served, a niche, a recognizable detail). Avoid generic flattery such as "impressive company" or "great work".
-9. Tone: warm, plain, peer to peer, human. No buzzwords, no superlatives, no salesy language.
-10. Format: 1 to 2 sentences. Start with a capital letter, end with a period, and return NO leading or trailing spaces. Plain text only.`;
+6. You MAY reference the recipient's own background, even where it overlaps with the sender's, but do NOT state the sender's matching trait or claim the shared bond directly. The body already reveals that the sender is an Army veteran and a California public agency CFO, so for any military, veteran, finance, or public sector overlap, never write the connection from the sender's side. Forbidden examples: "I too am a veteran", "as a fellow veteran", "I also spent my career in public service", "we share a public sector background". You may instead note the recipient's own service or public sector background as a fact about them, and let the body do the connecting, since the reader will infer the shared ground on their own.
+7. For genuine overlaps the body does NOT mention, you MAY draw the connection directly. The body covers only the sender's veteran service and public agency CFO role, nothing else about the sender. So other real overlaps the scanner identified, for example shared Sacramento or California roots, an immigrant or first generation story, a bootstrapped or built from nothing origin, endurance athletics, education, or a single parent upbringing, are fair to name directly in the hook, since the body will not surface them. Use only real, scanner identified overlaps. Do NOT force or stretch a connection. If nothing genuinely overlaps, write a concrete, respectful line about the recipient's business alone.
+8. Be specific and verifiable. Open on something real about the recipient or the company (years in business, the region served, a niche, a recognizable detail) so the line could only have been written to this owner. Avoid generic flattery such as "impressive company" or "great work".
+9. Tone: warm, plain, peer to peer, human, one future owner introducing himself to another. Match the voice of the email body. No buzzwords, no superlatives, no salesy language.
+10. Format: start with a capital letter, end with a period, and return NO leading or trailing spaces. Plain text only.`;
+
+// HOOK_RULES above is only the DEFAULT seed. The live, editable rules live in
+// hookRulesText (persisted to storage under 'criteria_hook_rules' and edited on
+// the Criteria page, just like the profile/weights/threshold/feedback). Whatever
+// is saved here is what gets sent to the screener and used by the manual hook
+// generate/feedback-rewrite, so this is the single source of truth at runtime.
+const HOOK_RULES_DEFAULT = HOOK_RULES;
+let hookRulesText = HOOK_RULES_DEFAULT;
+
+// Returns the rules currently in effect: live textarea value if the Criteria
+// page is open, otherwise the saved value, otherwise the built-in default.
+function getHookRules() {
+  const el = document.getElementById('hookRulesInput');
+  if (el && el.value.trim()) return el.value.trim();
+  return (hookRulesText && hookRulesText.trim()) ? hookRulesText : HOOK_RULES_DEFAULT;
+}
 
 // ─── SERVER-SIDE SCREENING ───────────────────────────────────────────────────
 let activeJobId   = null;
@@ -468,7 +491,8 @@ function buildCriteriaPayload() {
     profile,
     weights,
     feedback:     feedbackItems || [],
-    search2_terms: search2Terms
+    search2_terms: search2Terms,
+    hook_rules:   getHookRules()
   };
 }
 
@@ -1135,7 +1159,7 @@ function heuristicScreen(contact) {
     track: score > threshold ? 'Personal Outreach' : 'Standard Sequence',
     connections: reasons.slice(0, 4),
     recommendation: 'Heuristic mode only. Add an Anthropic API key to enable live AI scoring and web-backed connection analysis.',
-    hook: score > threshold ? `Your work building ${escapeHtml(company)} into a lasting operation in your field stands out, and the kind of business that gets built carefully over years is exactly what I pay attention to.` : '',
+    hook: `Your work building ${escapeHtml(company)} into a lasting operation in your field stands out, and businesses built carefully over years are exactly what I pay attention to.`,
     industryCluster: /fire|safety|suppression|sprinkler/i.test(company + ' ' + description) ? 'Fire Protection' : (contact.industry || 'Other')
   };
 }
@@ -1774,7 +1798,7 @@ ${hasFullName ? `2. "[owner name] [company name] ${getSearch2Terms()}"  -  targe
 
 Pay special attention to signals matching the connection triggers above. Also note: California roots (Sacramento, Antelope Valley, San Fernando Valley) are always relevant to Steven.
 
-${HOOK_RULES}`;
+${getHookRules()}`;
 
   const apiKey = await ensureApiKey();
   if (!apiKey) {
@@ -2307,22 +2331,26 @@ async function generateHookForIndex(index) {
   const hookCell = document.querySelector(`#row-${index} .hook-cell`);
   if (hookCell) hookCell.innerHTML = '<span style="color:var(--text-muted);font-size:11px;font-style:italic">Generating hook...</span>';
   try {
-    // Build a focused hook-only prompt
+    // Build a focused hook-only prompt using the SAME v4 HOOK_RULES the screener uses
     const profile = getProfileText();
     const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || 'the owner';
     const connections = (r.connections || []).map(cn => `- ${cn.type}: ${cn.description}`).join('\n') || 'No specific connections found';
-    const prompt = `Write a 2-sentence personal email opener for Steven Pavlov reaching out to ${name} at ${c.company || 'their company'}.
+    const prompt = `Write the {{hook}} line for Step 1 of Steven Pavlov's outreach email to ${name} at ${c.company || 'their company'}.
 
-Steven's profile: ${profile}
+${profile}
 
-Known connections/context:
+Contact:
+- Name: ${name}${c.jobTitle ? ` (${c.jobTitle})` : ''}
+- Company: ${c.company || ''}
+- Industry: ${c.industry || ''}
+- Location: ${c.location || ''}
+
+Known connections/context from screening:
 ${connections}
 
-Company: ${c.company || ''} | Industry: ${c.industry || ''} | Location: ${c.location || ''}
+${getHookRules()}
 
-Rules: Must feel personal and specific. Reference a real connection point if one exists. First sentence establishes the connection. Second sentence pivots to interest in the business. No generic openers. No mention of acquisition directly. Keep it warm and human.
-
-Respond with ONLY the 2-sentence hook. No explanation, no quotes, no preamble.`;
+Respond with ONLY the hook text. No explanation, no quotes, no preamble.`;
 
     const resp = await fetch('/api/messages', {
       method: 'POST',
@@ -2339,16 +2367,21 @@ Respond with ONLY the 2-sentence hook. No explanation, no quotes, no preamble.`;
       hookEdits[index] = hook;
       if (results[index]) results[index].hook = hook;
       renderRow(index);
-      // Auto-save the new hook to HubSpot
+      // Auto-save the new hook to HubSpot — preserve the contact's actual track.
+      // (Hooks now exist for both tracks, so generating one must NOT flip a
+      // Standard Sequence contact to Personal Outreach or mark it overridden.)
       if (c.hubspot_id && results[index]) {
+        const savedTrack = overrides[index]
+          ? (overrides[index] === 'personal' ? 'Personal Outreach' : 'Standard Sequence')
+          : (r.track || 'Standard Sequence');
         autoSaveToHubSpot(c.hubspot_id, {
-          track: 'Personal Outreach',
+          track: savedTrack,
           score: r.score,
           hook,
           recommendation: r.recommendation || '',
           track_reason: r.track_reason || '',
           connections: r.connections || [],
-          override: true,
+          override: !!overrides[index],
           override_note: results[index]._override_note || '',
           notes: notes[index] || ''
         });
@@ -2596,14 +2629,18 @@ async function rewriteHookWithFeedback() {
     const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || 'the owner';
     const connections = (r.connections || []).map(cn => `- ${cn.type}: ${cn.description}`).join('\n') || 'No specific connections found';
 
-    const prompt = `You are revising a 2-sentence personal email opener ("hook") that Steven Pavlov will use to reach out to ${name} at ${c.company || 'their company'}.
+    const prompt = `You are revising the {{hook}} line of Step 1 of Steven Pavlov's outreach email to ${name} at ${c.company || 'their company'}.
 
-Steven's profile: ${profile}
+${profile}
 
-Known connections/context:
+Contact:
+- Name: ${name}${c.jobTitle ? ` (${c.jobTitle})` : ''}
+- Company: ${c.company || ''}
+- Industry: ${c.industry || ''}
+- Location: ${c.location || ''}
+
+Known connections/context from screening:
 ${connections}
-
-Company: ${c.company || ''} | Industry: ${c.industry || ''} | Location: ${c.location || ''}
 
 CURRENT HOOK:
 "${currentHook || '(none written yet)'}"
@@ -2611,7 +2648,9 @@ CURRENT HOOK:
 STEVEN'S FEEDBACK ON HOW TO CHANGE IT:
 "${feedback}"
 
-Revise the hook to incorporate Steven's feedback. Keep what works in the current version and change what the feedback asks for. Stay personal and specific, reference a real connection point if one exists, keep it warm and human, and do not mention acquisition directly. Aim for 2 sentences unless the feedback explicitly asks otherwise.
+Revise the hook to incorporate Steven's feedback. Keep what works in the current version and change what the feedback asks for. Follow ALL of the hook rules below, unless Steven's feedback explicitly asks for something a rule would otherwise prevent, in which case his feedback wins for that specific point.
+
+${getHookRules()}
 
 Respond with ONLY the revised hook text. No explanation, no quotes, no preamble.`;
 
@@ -2782,18 +2821,16 @@ function buildRowHTML(contact, result, index) {
     }
   }
 
-  // HOOK CELL (editable) — shows email preview button if template is set
-  const isPersonalFinal = (result && result.track === 'Personal Outreach') || hasOverride;
+  // HOOK CELL (editable) — hooks now generate for BOTH tracks (Step 1 is identical),
+  // so show the hook for every screened contact regardless of Personal/Standard.
   const hasTemplate = false; // email template removed
   let hookCellContent;
   if (!result || result.status !== 'done') {
     hookCellContent = '<span style="color:var(--text-muted);font-size:12px"> - </span>';
-  } else if (isPersonalFinal && currentHook) {
+  } else if (currentHook) {
     hookCellContent = `<div class="hook-text" onclick="startHookEdit(${index})" title="Click to edit">${escapeHtml(currentHook)}</div>`;
-  } else if (isPersonalFinal) {
-    hookCellContent = `<span class="hook-text" style="color:var(--text-muted)" onclick="startHookEdit(${index})" title="Click to add hook">+ Add hook...</span>`;
   } else {
-    hookCellContent = '<span style="color:var(--text-muted);font-size:12px">Standard sequence</span>';
+    hookCellContent = `<span class="hook-text" style="color:var(--text-muted)" onclick="startHookEdit(${index})" title="Click to add hook">+ Add hook...</span>`;
   }
   const hookCell = `<div class="hook-cell" id="hook-cell-${index}">${hookCellContent}</div>`;
 
@@ -3523,18 +3560,20 @@ let customTriggers = []; // [{id, label, weight}]
 
 (async () => {
   try {
-    const [cw, cf, ct, cc, cp] = await Promise.all([
+    const [cw, cf, ct, cc, cp, chr] = await Promise.all([
       window.storage.get('criteria_weights').catch(()=>null),
       window.storage.get('criteria_feedback').catch(()=>null),
       window.storage.get('criteria_threshold').catch(()=>null),
       window.storage.get('criteria_custom_triggers').catch(()=>null),
       window.storage.get('criteria_profile').catch(()=>null),
+      window.storage.get('criteria_hook_rules').catch(()=>null),
     ]);
     if (cw && cw.value) criteriaWeights = JSON.parse(cw.value);
     if (cf && cf.value) feedbackItems = JSON.parse(cf.value);
     if (ct && ct.value) criteriaThreshold = parseInt(ct.value) || 40;
     if (cc && cc.value) customTriggers = JSON.parse(cc.value);
     if (cp && cp.value) profileCache = { ...PROFILE_DEFAULTS, ...JSON.parse(cp.value) };
+    if (chr && chr.value && chr.value.trim()) hookRulesText = chr.value;
     document.getElementById('thresholdInput').value = criteriaThreshold;
   } catch(e) {}
 })();
@@ -3654,6 +3693,10 @@ function renderCriteriaPage() {
     document.getElementById('profileOther').value = profileCache.other;
   }
 
+  // Populate the hook-rules editor from the saved value (or default seed)
+  const _hr = document.getElementById('hookRulesInput');
+  if (_hr && !_hr.value) _hr.value = hookRulesText || HOOK_RULES_DEFAULT;
+
   // Threshold pct
   updateThresholdPct();
 
@@ -3718,11 +3761,24 @@ async function saveCriteria() {
     await window.storage.set('criteria_threshold', String(criteriaThreshold));
     await window.storage.set('criteria_custom_triggers', JSON.stringify(customTriggers));
     await window.storage.set('criteria_profile', JSON.stringify(profileData));
+    // Hook rules — fall back to the default seed if the box was cleared
+    const hrEl = document.getElementById('hookRulesInput');
+    hookRulesText = (hrEl && hrEl.value.trim()) ? hrEl.value.trim() : HOOK_RULES_DEFAULT;
+    await window.storage.set('criteria_hook_rules', hookRulesText);
     profileCache = { ...profileData }; // keep cache in sync
   } catch(e) {}
   const saved = document.getElementById('criteriaSaved');
   if (saved) { saved.style.display = 'inline'; setTimeout(() => saved.style.display='none', 3000); }
   updateThresholdPct();
+}
+
+// Restore the hook rules to the built-in v4 default (does not auto-save until
+// the user clicks Save All, matching how the other criteria fields behave).
+function resetHookRules() {
+  const el = document.getElementById('hookRulesInput');
+  if (el) el.value = HOOK_RULES_DEFAULT;
+  hookRulesText = HOOK_RULES_DEFAULT;
+  autoSaveCriteria();
 }
 
 // Auto-save criteria 1s after any change to profile/threshold fields
@@ -3996,6 +4052,17 @@ function getFullEmail(contact, result, index) {
       </div>
       </div>
 
+      </div>
+    </div>
+
+    <div class="feedback-box">
+      <h3>Hook Rules</h3>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">The instructions the AI follows when writing each contact's {{hook}} (the personalized opening line in Step 1). Edited here, saved, and applied to the next screening run and to manual hook generate/rewrite  -  just like the screening criteria. These apply to both Personal Outreach and Standard Sequence, since Step 1 is identical for both.</p>
+      <textarea class="feedback-textarea" id="hookRulesInput" spellcheck="false" oninput="autoSaveCriteria()" style="min-height:320px;font-family:'DM Mono',ui-monospace,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap"></textarea>
+      <div style="display:flex;gap:10px;margin-top:12px;align-items:center;flex-wrap:wrap">
+        <button class="crit-save-btn" onclick="saveCriteria()">&#10003; Save All</button>
+        <button class="crit-save-btn" onclick="resetHookRules()" style="background:transparent;color:var(--text-muted);border:1px solid var(--border)">↺ Reset to default</button>
+        <span style="font-size:12px;color:var(--text-muted)">Tip: leave the box empty and Save to fall back to the built-in default.</span>
       </div>
     </div>
 
