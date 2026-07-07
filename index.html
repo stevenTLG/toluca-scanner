@@ -244,6 +244,7 @@
     <button class="btn btn-secondary" id="btnStop" style="display:none" onclick="stopProcessing()">Pause</button>
     <button class="btn btn-secondary" onclick="showApiKeyModal('Enter or update your Anthropic API key.')" style="font-size:11px;padding:10px 14px" title="Set API Key" id="btn-api-key">🔑 API Key</button>
     <button class="btn btn-primary" id="btnRun" onclick="startServerScreening()">▶ Run Screener</button>
+    <button class="btn btn-secondary" id="btnRegenHooks" onclick="regenerateHooks()" style="font-size:12px;padding:10px 14px" title="Regenerate the hook for every contact in this batch (both Personal and Standard) using the current hook rules. Scores and tracks are left unchanged.">♻ Regenerate Hooks</button>
     <button class="btn" id="btnPause" onclick="togglePauseScreening()" style="display:none;background:rgba(201,168,76,0.15);color:var(--amber);border:1px solid rgba(201,168,76,0.3)">⏸ Pause</button>
   </div>
 
@@ -604,6 +605,74 @@ async function startServerScreening() {
   }
 }
 
+async function regenerateHooks() {
+  if (!BATCH_ID) { await showAlert('No batch loaded. Open the scanner from a batch in Toluca Tools.'); return; }
+  if (activeJobId) { await showAlert('A job is already running for this batch.'); return; }
+  const ok = await showConfirm(
+    'Regenerate all hooks?',
+    'This rewrites the hook for every contact in this batch (both Personal Outreach and Standard Sequence) using the current hook rules, and overwrites the existing hooks. Scores, tracks, and connections are left unchanged.',
+    'Regenerate', 'Cancel'
+  );
+  if (!ok) return;
+
+  const btn = document.getElementById('btnRegenHooks');
+  const runBtn = document.getElementById('btnRun');
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting...'; }
+  if (runBtn) runBtn.disabled = true;
+  document.getElementById('server-progress').style.display = 'block';
+  document.getElementById('controlDesc').textContent = 'Regenerating hooks — you can close this tab safely.';
+
+  async function post(body) {
+    const r = await fetch('/api/regen-hooks', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    return { r, d: await r.json() };
+  }
+  function resetButtons() {
+    if (btn) { btn.disabled = false; btn.textContent = '♻ Regenerate Hooks'; }
+    if (runBtn) runBtn.disabled = false;
+  }
+
+  try {
+    let { r: resp, d: data } = await post({ batch_id: BATCH_ID, criteria: buildCriteriaPayload() });
+
+    // 409 = a job already exists. Reconnect if alive, force-restart if stale.
+    if (resp.status === 409 && data.job_id) {
+      const hbAge = typeof data.hb_age === 'number' ? data.hb_age : 999;
+      if (hbAge > 30) {
+        ({ r: resp, d: data } = await post({ batch_id: BATCH_ID, criteria: buildCriteriaPayload(), force: true }));
+      } else {
+        activeJobId = data.job_id;
+        if (btn) btn.textContent = '⏳ Regenerating...';
+        document.getElementById('server-progress-label').textContent = 'Reconnecting to running job...';
+        startPolling();
+        return;
+      }
+    }
+
+    if (!resp.ok || data.error) {
+      resetButtons();
+      await showAlert(data.error || 'Failed to start hook regeneration');
+      return;
+    }
+
+    activeJobId = data.job_id;
+    try {
+      await window.storage.set('active_job_' + BATCH_ID, JSON.stringify({
+        job_id: activeJobId, started: new Date().toISOString(), total: data.total, mode: 'hooks'
+      }));
+    } catch (e) {}
+
+    if (btn) btn.textContent = '⏳ Regenerating...';
+    document.getElementById('server-progress-label').textContent = `Regenerating ${data.total} hooks...`;
+    startPolling();
+  } catch (e) {
+    resetButtons();
+    await showAlert('Network error: ' + e.message);
+  }
+}
+
 function startPolling() {
   if (pollInterval) clearInterval(pollInterval);
   pollInterval = setInterval(pollJobStatus, 3000);
@@ -680,17 +749,21 @@ function updateProgressUI(job) {
 }
 
 async function onScreeningComplete(job) {
+  const isHooks = job && job.mode === 'hooks';
   const btn = document.getElementById('btnRun');
   btn.disabled = false;
   btn.textContent = '▶ Run Screener';
+  const regenBtn = document.getElementById('btnRegenHooks');
+  if (regenBtn) { regenBtn.disabled = false; regenBtn.textContent = '♻ Regenerate Hooks'; }
   _hidePauseBtn();
 
   document.getElementById('server-progress-contact').textContent = '';
   document.getElementById('server-progress-eta').textContent = '✓ Complete';
   document.getElementById('server-progress-pct').textContent = '100%';
   document.getElementById('server-progress-fill').style.width = '100%';
-  document.getElementById('controlDesc').textContent =
-    `Screening complete — ${job.processed} contacts scored. Reloading results from HubSpot...`;
+  document.getElementById('controlDesc').textContent = isHooks
+    ? `Hook regeneration complete — ${job.processed} hooks rewritten. Reloading results from HubSpot...`
+    : `Screening complete — ${job.processed} contacts scored. Reloading results from HubSpot...`;
 
   activeJobId = null;
   try { await window.storage.delete('active_job_' + BATCH_ID); } catch(e) {}
