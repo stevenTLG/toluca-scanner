@@ -391,6 +391,168 @@ def _run_job(job_id, contacts, criteria):
             'heartbeat': time.time(), 'finished_at': time.time()
         })
 
+# ─── HOOK-ONLY REGENERATION ───────────────────────────────────────────────────
+# Regenerates just the {{hook}} for a contact, preserving the existing score,
+# track, and connections. Used by the "Regenerate Hooks" button so the current
+# HOOK_RULES can be re-applied to a whole batch without re-scoring everything.
+def _build_hook_prompt(contact, criteria):
+    name = ' '.join(filter(None, [contact.get('firstName', ''), contact.get('lastName', '')])) or 'Unknown owner'
+    has_full = bool(contact.get('firstName') and contact.get('lastName'))
+    hook_rules = (criteria.get('hook_rules') or '').strip() or HOOK_RULES
+    ctx_bits = []
+    if contact.get('existing_track_reason'):
+        ctx_bits.append(f"Track reason: {contact['existing_track_reason']}")
+    if contact.get('existing_connections'):
+        ctx_bits.append(f"Scanner-identified connections (JSON): {contact['existing_connections']}")
+    ctx = '\n'.join(ctx_bits) if ctx_bits else 'No prior connection data on file.'
+    prompt = f"""You are writing ONE outreach email hook for Steven Pavlov, a Sacramento-area acquisition entrepreneur who buys and operates small businesses. Write ONLY the hook text, following the HOOK RULES exactly. The same hook is used for both the Personal Outreach and Standard Sequence tracks.
+
+Contact:
+- Name: {name} ({contact.get('jobTitle', '')})
+- Company: {contact.get('company', '')}
+- Industry: {contact.get('industry', '')}
+- Location: {contact.get('location', '')}
+- Description: {contact.get('description', '')}
+- LinkedIn: {contact.get('linkedin', '')}
+- Founded: {contact.get('founded', '')}
+
+Prior scanner findings, for grounding only (use only if genuine, never fabricate):
+{ctx}
+
+Respond ONLY with raw JSON (no markdown): {{"hook":"<the hook text>"}}
+
+{hook_rules}"""
+    return prompt, has_full
+
+def _regen_hook_one(contact, criteria):
+    prompt, has_name = _build_hook_prompt(contact, criteria)
+    body = {'model': SCREENING_MODEL, 'max_tokens': 600, 'messages': [{'role': 'user', 'content': prompt}]}
+    if has_name:
+        body['tools'] = [{'type': 'web_search_20250305', 'name': 'web_search'}]
+    for attempt in range(3):
+        resp = requests.post(f'{ANTHROPIC_BASE}/v1/messages', headers=anthropic_headers(), json=body, timeout=180)
+        if resp.status_code == 429:
+            time.sleep((attempt + 1) * 30)
+            continue
+        if not resp.ok:
+            raise Exception(f"Anthropic {resp.status_code}: {resp.text[:300]}")
+        data = resp.json()
+        if data.get('error'):
+            raise Exception(data['error'].get('message', 'API error'))
+        usage = data.get('usage', {})
+        text = '\n'.join(b['text'] for b in data.get('content', []) if b.get('type') == 'text')
+        result = _parse_result(text)
+        if result and result.get('hook'):
+            return {'hook': result['hook'], '_tokens': {'input': usage.get('input_tokens', 0), 'output': usage.get('output_tokens', 0)}}
+        raise Exception(f"Hook parse failed: {text[:300]}")
+    raise Exception("All attempts failed")
+
+def _write_hook_to_hs(hubspot_id, hook):
+    props = {'scanner_hook': (hook or '')[:65000]}
+    resp = requests.patch(f'{HUBSPOT_BASE}/crm/v3/objects/contacts/{hubspot_id}',
+                          headers=hs_headers(), json={'properties': props}, timeout=15)
+    return resp.ok, (None if resp.ok else f"HTTP {resp.status_code}: {resp.text[:200]}")
+
+def _run_hook_job(job_id, contacts, criteria):
+    with JOBS_LOCK:
+        JOBS[job_id]['status'] = 'running'
+        JOBS[job_id]['heartbeat'] = time.time()
+    processed, errors = 0, []
+    for i, contact in enumerate(contacts):
+        with JOBS_LOCK:
+            JOBS[job_id]['heartbeat'] = time.time()
+        name = f"{contact.get('firstName', '')} {contact.get('lastName', '')} @ {contact.get('company', '')}".strip()
+        with JOBS_LOCK:
+            JOBS[job_id]['current_contact'] = name
+            JOBS[job_id]['current_index'] = i
+        try:
+            t_start = time.time()
+            result = _regen_hook_one(contact, criteria)
+            duration_ms = int((time.time() - t_start) * 1000)
+            ok, err = _write_hook_to_hs(contact['hubspot_id'], result.get('hook', ''))
+            if not ok:
+                errors.append({'contact': name, 'error': f'HubSpot: {err}'})
+            tok = result.get('_tokens', {})
+            tok_in, tok_out = tok.get('input', 0), tok.get('output', 0)
+            contact_cost = round((tok_in * 3 / 1_000_000) + (tok_out * 15 / 1_000_000), 5)
+            processed += 1
+            with JOBS_LOCK:
+                JOBS[job_id]['processed'] = processed
+                JOBS[job_id]['heartbeat'] = time.time()
+                JOBS[job_id]['tokens_input'] += tok_in
+                JOBS[job_id]['tokens_output'] += tok_out
+                JOBS[job_id]['results'][contact['hubspot_id']] = {'hook': result.get('hook', '')}
+                JOBS[job_id]['contact_meta'][contact['hubspot_id']] = {
+                    'tokens_input': tok_in, 'tokens_output': tok_out,
+                    'cost': contact_cost, 'duration_ms': duration_ms,
+                    'stop_reason': 'end_turn', 'used_tools': True
+                }
+        except Exception as e:
+            errors.append({'contact': name, 'error': str(e)})
+            processed += 1
+            with JOBS_LOCK:
+                JOBS[job_id]['processed'] = processed
+                JOBS[job_id]['heartbeat'] = time.time()
+        with JOBS_LOCK:
+            JOBS[job_id]['errors'] = errors
+        if i < len(contacts) - 1:
+            time.sleep(2)
+        while JOBS.get(job_id, {}).get('paused'):
+            with JOBS_LOCK:
+                JOBS[job_id]['heartbeat'] = time.time()
+            time.sleep(1)
+    with JOBS_LOCK:
+        JOBS[job_id].update({
+            'status': 'done', 'done': True, 'errors': errors,
+            'processed': processed, 'current_contact': None,
+            'heartbeat': time.time(), 'finished_at': time.time()
+        })
+
+@app.route('/api/regen-hooks', methods=['POST'])
+def regen_hooks():
+    if not ANTHROPIC_KEY:
+        return jsonify({'error': 'ANTHROPIC_KEY not configured'}), 500
+    if not HUBSPOT_TOKEN:
+        return jsonify({'error': 'HUBSPOT_TOKEN not configured'}), 500
+    data = request.get_json(force=True)
+    batch_id = data.get('batch_id', '').strip()
+    criteria = data.get('criteria', {})
+    force = bool(data.get('force'))
+    if not batch_id:
+        return jsonify({'error': 'batch_id required'}), 400
+    # Same live/stale guard as screen-batch so a regen can't collide with a running job.
+    with JOBS_LOCK:
+        for jid, job in list(JOBS.items()):
+            if job.get('batch_id') == batch_id and not job.get('done'):
+                hb_age = time.time() - job.get('heartbeat', job.get('started_at', 0))
+                is_dead = hb_age > 90
+                is_alive = hb_age <= 20
+                if (force and not is_alive) or is_dead:
+                    JOBS[jid]['done'] = True
+                    JOBS[jid]['status'] = 'stale'
+                    continue
+                return jsonify({'error': 'Job already running', 'job_id': jid, 'hb_age': round(hb_age, 1)}), 409
+    try:
+        # full=True so the hook prompt can be grounded in existing connections/track_reason.
+        contacts = _fetch_contacts(batch_id, full=True)
+    except Exception as e:
+        return jsonify({'error': f'Failed to fetch contacts: {e}'}), 500
+    # Regenerate the hook for EVERY contact in the batch, regardless of track or score.
+    job_id = str(uuid.uuid4())[:8]
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            'paused': False, 'mode': 'hooks',
+            'job_id': job_id, 'batch_id': batch_id, 'status': 'queued',
+            'total': len(contacts), 'total_contacts': len(contacts), 'processed': 0,
+            'skipped': 0, 'current_contact': None, 'current_index': 0,
+            'errors': [], 'results': {}, 'done': False, 'started_at': time.time(),
+            'heartbeat': time.time(), 'finished_at': None,
+            'tokens_input': 0, 'tokens_output': 0, 'contact_meta': {}
+        }
+    threading.Thread(target=_run_hook_job, args=(job_id, contacts, criteria), daemon=True).start()
+    return jsonify({'ok': True, 'job_id': job_id, 'total': len(contacts),
+                    'already_screened': 0, 'total_contacts': len(contacts), 'mode': 'hooks'})
+
 @app.route('/api/pause-job', methods=['POST'])
 def pause_job():
     data = request.get_json(force=True)
@@ -472,6 +634,7 @@ def screen_status(job_id):
         eta = int(rate * (job['total'] - job['processed']))
     return jsonify({
         'job_id': job['job_id'], 'batch_id': job['batch_id'], 'status': job['status'],
+        'mode': job.get('mode', 'screen'),
         'total': job['total'], 'total_contacts': job.get('total_contacts', job['total']),
         'processed': job['processed'], 'skipped': job.get('skipped', 0), 'pct': pct,
         'current_contact': job.get('current_contact'), 'errors': job.get('errors', []),
