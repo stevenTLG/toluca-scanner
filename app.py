@@ -237,9 +237,10 @@ def _build_prompt(contact, criteria):
     weights = criteria.get('weights', [])
     feedback = criteria.get('feedback', [])
     search2_terms = criteria.get('search2_terms', '')
-    # Hook rules are editable from the Criteria page and arrive in the payload.
-    # The HOOK_RULES constant above is only the default seed / fallback.
-    hook_rules = (criteria.get('hook_rules') or '').strip() or HOOK_RULES
+    # Hook rules are defined by the HOOK_RULES constant in this file, which is the
+    # single source of truth. The Criteria-page box no longer overrides it; it is
+    # only used if HOOK_RULES is somehow empty. Edit HOOK_RULES in this file to change hooks.
+    hook_rules = HOOK_RULES or (criteria.get('hook_rules') or '').strip()
     wlabels = ['', 'Low', 'Medium', 'High']
     weights_text = '\n'.join(
         f"- {w['label']}: {wlabels[min(w.get('weight', 1), 3)]}"
@@ -398,7 +399,8 @@ def _run_job(job_id, contacts, criteria):
 def _build_hook_prompt(contact, criteria):
     name = ' '.join(filter(None, [contact.get('firstName', ''), contact.get('lastName', '')])) or 'Unknown owner'
     has_full = bool(contact.get('firstName') and contact.get('lastName'))
-    hook_rules = (criteria.get('hook_rules') or '').strip() or HOOK_RULES
+    # HOOK_RULES in this file is the single source of truth (see _build_prompt).
+    hook_rules = HOOK_RULES or (criteria.get('hook_rules') or '').strip()
     ctx_bits = []
     if contact.get('existing_track_reason'):
         ctx_bits.append(f"Track reason: {contact['existing_track_reason']}")
