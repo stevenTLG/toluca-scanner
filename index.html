@@ -287,7 +287,7 @@
     <button class="export-btn" onclick="exportTrackCSV('Personal Outreach')" style="color:var(--gold);border-color:rgba(201,168,76,0.3)" title="Export only Personal Outreach contacts">↓ Personal CSV</button>
     <button class="export-btn" onclick="exportTrackCSV('Standard Sequence')" style="color:var(--green);border-color:rgba(76,175,125,0.3)" title="Export only Standard Sequence contacts">↓ Standard CSV</button>
     <button class="export-btn" onclick="exportExcel()" style="color:var(--green);border-color:rgba(76,175,125,0.3)" title="Export full results to Excel">↓ Export Excel</button>
-    <button class="export-btn" onclick="triggerImport()" style="color:var(--gold);border-color:rgba(201,168,76,0.3)" title="Import contacts from a Grata CSV export">↑ Import CSV</button>
+    <button class="export-btn" onclick="triggerImport()" style="color:var(--gold);border-color:rgba(201,168,76,0.3)" title="Import a contact list directly and score it — no HubSpot required">↑ Import CSV</button>
     <input type="file" id="csvFileInput" accept=".csv" style="display:none" onchange="handleCSVImport(event)">
     <button class="export-btn" style="color:var(--red);border-color:var(--border)" onclick="hardReset()">✕ Clear</button>
     <button class="export-btn" id="btnDebug" onclick="toggleDebug()" style="color:var(--text-muted)">⬤ Debug OFF</button>
@@ -475,7 +475,19 @@ async function togglePauseScreening() {
   } catch(e) {}
 }
 
+// ─── LOCAL (CSV-imported) BATCH SUPPORT ─────────────────────────
+// Lets the scanner score a contact list without ever touching HubSpot: contacts
+// come from a CSV instead of a batch_id, sync is force-disabled, and everything
+// lives in local storage only.
+let IS_LOCAL_BATCH = false;
+let LOCAL_BATCH_ID = null;
+
+function _activeBatchKey() {
+  return IS_LOCAL_BATCH ? LOCAL_BATCH_ID : BATCH_ID;
+}
+
 function getSyncToHubSpotSetting() {
+  if (IS_LOCAL_BATCH) return false; // nothing real to sync to
   const el = document.getElementById('syncToHubSpotToggle');
   return el ? !!el.checked : true;
 }
@@ -507,8 +519,9 @@ function buildCriteriaPayload() {
 }
 
 async function startServerScreening() {
-  if (!BATCH_ID) {
-    await showAlert('No batch loaded. Open the scanner from a batch in Toluca Tools.');
+  const isLocal = IS_LOCAL_BATCH && allContacts.length > 0;
+  if (!BATCH_ID && !isLocal) {
+    await showAlert('No batch loaded. Open the scanner from a batch in Toluca Tools, or use Import CSV to load contacts directly.');
     return;
   }
   if (activeJobId) {
@@ -523,12 +536,15 @@ async function startServerScreening() {
   document.getElementById('controlDesc').textContent = 'Server is processing contacts — you can close this tab safely.';
 
   const syncToHubSpot = getSyncToHubSpotSetting();
+  const requestBody = isLocal
+    ? { batch_id: LOCAL_BATCH_ID, contacts: allContacts, criteria: buildCriteriaPayload(), sync_to_hubspot: false }
+    : { batch_id: BATCH_ID, criteria: buildCriteriaPayload(), sync_to_hubspot: syncToHubSpot };
 
   try {
     const resp = await fetch('/api/screen-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ batch_id: BATCH_ID, criteria: buildCriteriaPayload(), sync_to_hubspot: syncToHubSpot })
+      body: JSON.stringify(requestBody)
     });
     const data = await resp.json();
 
@@ -544,13 +560,15 @@ async function startServerScreening() {
           const forceResp = await fetch('/api/screen-batch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ batch_id: BATCH_ID, criteria: buildCriteriaPayload(), force: true, sync_to_hubspot: syncToHubSpot })
+            body: JSON.stringify(isLocal
+              ? { batch_id: LOCAL_BATCH_ID, contacts: allContacts, criteria: buildCriteriaPayload(), force: true, sync_to_hubspot: false }
+              : { batch_id: BATCH_ID, criteria: buildCriteriaPayload(), force: true, sync_to_hubspot: syncToHubSpot })
           });
           const forceData = await forceResp.json();
           if (forceResp.ok && forceData.job_id) {
             activeJobId = forceData.job_id;
             try {
-              await window.storage.set('active_job_' + BATCH_ID, JSON.stringify({
+              await window.storage.set('active_job_' + _activeBatchKey(), JSON.stringify({
                 job_id: activeJobId, started: new Date().toISOString(), total: forceData.total
               }));
             } catch(e) {}
@@ -595,7 +613,7 @@ async function startServerScreening() {
 
     // Save job ID to storage so we can reconnect after page reload
     try {
-      await window.storage.set('active_job_' + BATCH_ID, JSON.stringify({
+      await window.storage.set('active_job_' + _activeBatchKey(), JSON.stringify({
         job_id: activeJobId,
         started: new Date().toISOString(),
         total: data.total
@@ -672,7 +690,7 @@ async function regenerateHooks() {
 
     activeJobId = data.job_id;
     try {
-      await window.storage.set('active_job_' + BATCH_ID, JSON.stringify({
+      await window.storage.set('active_job_' + _activeBatchKey(), JSON.stringify({
         job_id: activeJobId, started: new Date().toISOString(), total: data.total, mode: 'hooks'
       }));
     } catch (e) {}
@@ -732,7 +750,7 @@ async function pollJobStatus() {
       console.log('[pollJobStatus] Active job', activeJobId, 'went dead (hb_age=' + job.hb_age + 's) — stopping');
       stopPolling();
       activeJobId = null;
-      try { await window.storage.delete('active_job_' + BATCH_ID); } catch(e) {}
+      try { await window.storage.delete('active_job_' + _activeBatchKey()); } catch(e) {}
       _hidePauseBtn();
       const btn = document.getElementById('btnRun');
       if (btn) { btn.disabled = false; btn.textContent = '▶ Run Screener'; }
@@ -776,7 +794,7 @@ async function onScreeningComplete(job) {
   document.getElementById('server-progress-fill').style.width = '100%';
 
   activeJobId = null;
-  try { await window.storage.delete('active_job_' + BATCH_ID); } catch(e) {}
+  try { await window.storage.delete('active_job_' + _activeBatchKey()); } catch(e) {}
 
   // Persist per-contact technical metadata to localStorage
   if (job.contact_meta && Object.keys(job.contact_meta).length > 0) {
@@ -851,9 +869,9 @@ function mergeJobResultsLocally(job, isHooks) {
 
 // On page load: reconnect to any running job for this batch
 async function reconnectJob() {
-  if (!BATCH_ID) return;
+  if (!_activeBatchKey()) return;
   try {
-    const stored = await window.storage.get('active_job_' + BATCH_ID).catch(()=>null);
+    const stored = await window.storage.get('active_job_' + _activeBatchKey()).catch(()=>null);
     if (!stored || !stored.value) return;
     const saved = JSON.parse(stored.value);
     if (!saved.job_id) return;
@@ -864,7 +882,7 @@ async function reconnectJob() {
     // 404 = server restarted and lost the job — clear stored ID and let autostart handle it
     if (resp.status === 404) {
       console.log('[reconnectJob] Job', saved.job_id, 'not found (server restarted) — clearing stored job');
-      await window.storage.delete('active_job_' + BATCH_ID).catch(()=>{});
+      await window.storage.delete('active_job_' + _activeBatchKey()).catch(()=>{});
       return;
     }
 
@@ -873,7 +891,7 @@ async function reconnectJob() {
 
     if (job.done) {
       // Job finished while we were away — reload results
-      await window.storage.delete('active_job_' + BATCH_ID).catch(()=>{});
+      await window.storage.delete('active_job_' + _activeBatchKey()).catch(()=>{});
       if (job.sync_to_hubspot === false) {
         document.getElementById('controlDesc').textContent = 'Previous scoring-only job completed. Loading results...';
         mergeJobResultsLocally(job, job.mode === 'hooks');
@@ -890,7 +908,7 @@ async function reconnectJob() {
     // let autostart begin a fresh run instead of reconnecting to a corpse.
     if (job.dead || (typeof job.hb_age === 'number' && job.hb_age > 90)) {
       console.log('[reconnectJob] Job', saved.job_id, 'is dead (hb_age=' + job.hb_age + 's) — clearing, will start fresh');
-      await window.storage.delete('active_job_' + BATCH_ID).catch(()=>{});
+      await window.storage.delete('active_job_' + _activeBatchKey()).catch(()=>{});
       return;
     }
 
@@ -1450,6 +1468,52 @@ function showBatchControls(batchId) {
   toolbar.parentNode.insertBefore(bar, toolbar);
 }
 
+// Lightweight equivalent of showBatchControls for CSV-imported (local) contacts —
+// no HubSpot buttons at all, since there's nothing real to write to or roll back.
+function showLocalBatchControls() {
+  const existing = document.getElementById('batch-action-bar');
+  if (existing) existing.remove();
+  const toolbar = document.querySelector('.toolbar');
+  const bar = document.createElement('div');
+  bar.id = 'batch-action-bar';
+  bar.style.cssText = 'display:flex;gap:10px;align-items:center;margin-bottom:12px;padding:12px 16px;background:rgba(120,120,120,0.08);border:1px solid var(--border);border-radius:8px;flex-wrap:wrap';
+  bar.innerHTML = `
+    <span style="font-size:12px;color:var(--text-muted);font-weight:600;letter-spacing:0.5px">📄 Local CSV batch (not in HubSpot)</span>
+    <span style="font-size:11px;color:var(--text-muted)">${allContacts.length} contacts</span>
+    <div style="flex:1"></div>
+    <button class="btn btn-secondary" onclick="exportCSV()" style="font-size:12px;padding:8px 16px" title="Export all scored contacts to CSV">
+      ↓ Export CSV
+    </button>
+    <button class="btn btn-secondary" onclick="clearLocalBatch()" style="font-size:12px;padding:8px 16px;color:var(--red);border-color:rgba(232,92,76,0.4)" title="Clear this local batch and its results">
+      ✕ Clear Local Batch
+    </button>
+  `;
+  toolbar.parentNode.insertBefore(bar, toolbar);
+  // Hide/disable the sync-to-HubSpot toggle — nothing real to sync to here.
+  const syncLabel = document.getElementById('syncToggleLabel');
+  if (syncLabel) syncLabel.style.display = 'none';
+}
+
+async function clearLocalBatch() {
+  const ok = await showConfirm('Clear Local Batch', 'Clear this locally-imported contact list and all its results? This cannot be undone.', 'Clear', 'Cancel');
+  if (!ok) return;
+  IS_LOCAL_BATCH = false;
+  LOCAL_BATCH_ID = null;
+  allContacts = [];
+  results = {}; overrides = {}; notes = {}; hookEdits = {}; hookFeedback = {};
+  personalCount = 0; standardCount = 0; processedCount = 0;
+  const keys = ['screener_results','screener_overrides','screener_notes','screener_hooks','csv_contacts','csv_batch_id'];
+  await Promise.allSettled(keys.map(k => window.storage.delete(k).catch(()=>{})));
+  const bar = document.getElementById('batch-action-bar');
+  if (bar) bar.remove();
+  const syncLabel = document.getElementById('syncToggleLabel');
+  if (syncLabel) syncLabel.style.display = '';
+  document.getElementById('statTotal').textContent = '0';
+  document.getElementById('headerDesc').textContent = 'No contacts loaded — use Import CSV to load a list.';
+  updateStats();
+  renderTable();
+}
+
 async function rollbackHubSpot() {
   if (!BATCH_ID) { await showAlert('No batch loaded.'); return; }
   const ok = await showConfirm(
@@ -1643,9 +1707,34 @@ document.getElementById('headerDesc').textContent = BATCH_ID
 DOM['controlTitle'].textContent = 'Loading saved results...';
 renderTable();
 
-// If batch_id in URL, load from HubSpot
+// If batch_id in URL, load from HubSpot. Otherwise try to restore a previously
+// CSV-imported local batch (there's no HubSpot batch to load in that case).
 if (BATCH_ID) {
   loadBatchFromHubSpot(BATCH_ID);
+  // A HubSpot batch is loaded — Import CSV would create an inconsistent mixed
+  // state (some contacts real, some synthetic), so hide it while one is open.
+  const importBtn = document.querySelector('[onclick="triggerImport()"]');
+  if (importBtn) importBtn.style.display = 'none';
+} else {
+  restoreLocalBatch();
+}
+
+async function restoreLocalBatch() {
+  try {
+    const savedContacts = await window.storage.get('csv_contacts').catch(()=>null);
+    const savedBatchId = await window.storage.get('csv_batch_id').catch(()=>null);
+    if (!savedContacts || !savedContacts.value || !savedBatchId || !savedBatchId.value) return;
+    allContacts = JSON.parse(savedContacts.value);
+    LOCAL_BATCH_ID = savedBatchId.value;
+    IS_LOCAL_BATCH = true;
+    document.getElementById('statTotal').textContent = allContacts.length;
+    document.getElementById('headerDesc').textContent = `${allContacts.length} contacts loaded from CSV — not in HubSpot`;
+    DOM['controlTitle'].textContent = `Ready to Screen ${allContacts.length} Contacts`;
+    showLocalBatchControls();
+    renderTable();
+    updateStats();
+    setTimeout(reconnectJob, 500);
+  } catch(e) {}
 }
 
 // Load all persistent state on startup
@@ -3589,20 +3678,34 @@ async function confirmImport(mode) {
     await Promise.allSettled(keys.map(k => window.storage.set(k, '{}')));
     await Promise.allSettled(keys.map(k => window.storage.delete(k)));
     allContacts = _pendingImportContacts;
+    LOCAL_BATCH_ID = 'local-' + Date.now();
   } else {
     // Append  -  new contacts start at end, existing results untouched
     allContacts = [...allContacts, ..._pendingImportContacts];
+    if (!LOCAL_BATCH_ID) LOCAL_BATCH_ID = 'local-' + Date.now();
   }
+  IS_LOCAL_BATCH = true;
+
+  // Tag every contact with a stable synthetic id — there's no real HubSpot id for
+  // these, but results still need something to match back against after scoring.
+  allContacts.forEach((c, i) => { if (!c.hubspot_id) c.hubspot_id = 'local-' + i; });
 
   _pendingImportContacts = null;
 
+  // Persist so a page reload doesn't lose the imported list
+  try {
+    await window.storage.set('csv_contacts', JSON.stringify(allContacts));
+    await window.storage.set('csv_batch_id', LOCAL_BATCH_ID);
+  } catch(e) {}
+
   // Update UI
   document.getElementById('statTotal').textContent = allContacts.length;
-  document.getElementById('headerDesc').textContent = `Test A v2 (1-at-a-time)  -  first 100 of ${allContacts.length} contacts`;
+  document.getElementById('headerDesc').textContent = `${allContacts.length} contacts loaded from CSV — not in HubSpot`;
   DOM['controlTitle'].textContent = `Ready to Screen ${allContacts.length} Contacts`;
   DOM['controlDesc'].textContent = 'Click Run Screener to analyze all contacts';
   DOM['btnRun'].textContent = 'Run Screener';
   DOM['btnRun'].disabled = false;
+  showLocalBatchControls();
   updateStats();
   renderTable();
 }
@@ -3627,9 +3730,11 @@ function parseCSV(text) {
     'first name': 'firstName', 'firstname': 'firstName', 'first_name': 'firstName', 'owner first name': 'firstName',
     'last name': 'lastName', 'lastname': 'lastName', 'last_name': 'lastName', 'owner last name': 'lastName',
     // Company
-    'company': 'company', 'company name': 'company', 'organization': 'company', 'account name': 'company',
+    'company': 'company', 'company name': 'company', 'organization': 'company', 'account name': 'company', 'business name': 'company',
     // Title
-    'job title': 'jobTitle', 'title': 'jobTitle', 'jobtitle': 'jobTitle', 'role': 'jobTitle', 'position': 'jobTitle',
+    'job title': 'jobTitle', 'title': 'jobTitle', 'jobtitle': 'jobTitle', 'role': 'jobTitle', 'position': 'jobTitle', 'officer role': 'jobTitle',
+    // Combined name field (e.g. a call-list's "Officer" column) — split after mapping
+    'officer': 'fullName', 'owner': 'fullName', 'contact name': 'fullName', 'name': 'fullName',
     // Contact
     'email': 'email', 'email address': 'email', 'work email': 'email',
     'linkedin': 'linkedin', 'linkedin url': 'linkedin', 'linkedin profile': 'linkedin', 'linkedin profile url': 'linkedin',
@@ -3643,6 +3748,8 @@ function parseCSV(text) {
     'key people': 'keyPeople', 'keypeopledisplay': 'keyPeople', 'key executives': 'keyPeople',
     'grata link': 'grataLink', 'gratalink': 'grataLink', 'profile url': 'grataLink',
     'domain': 'domain', 'website': 'domain', 'web address': 'domain',
+    // Phone — added for call-prep use cases (contacts scored without email)
+    'phone': 'phone', 'phone number': 'phone', 'business name phone': 'phone',
   };
 
   // Map headers to field names
@@ -3656,13 +3763,21 @@ function parseCSV(text) {
     const cells = parseCSVRow(line);
     const contact = {
       firstName: '', lastName: '', jobTitle: '', company: '', industry: '',
-      location: '', email: '', description: '', linkedin: '', revenue: '',
+      location: '', email: '', phone: '', description: '', linkedin: '', revenue: '',
       founded: '', ownership: '', keyPeople: '', grataLink: '', domain: ''
     };
     cells.forEach((val, j) => {
       const field = fieldMap[j];
       if (field) contact[field] = val.trim();
     });
+    // Split a combined "Officer"/"Owner"/"Name" column into first/last if those
+    // weren't already provided by separate columns.
+    if (contact.fullName && !contact.firstName && !contact.lastName) {
+      const parts = contact.fullName.trim().split(/\s+/);
+      contact.lastName = parts.length > 1 ? parts.pop() : '';
+      contact.firstName = parts.join(' ');
+    }
+    delete contact.fullName;
     // Skip entirely blank rows
     if (!contact.company && !contact.firstName && !contact.lastName && !contact.email) continue;
     contacts.push(contact);
