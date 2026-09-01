@@ -693,8 +693,9 @@ def screen_status(job_id):
         'contact_meta': job.get('contact_meta', {}) if job.get('done') else {},
         # Only needed when sync_to_hs is off (nothing was written to HubSpot), so the
         # frontend can populate scores/hooks from the job itself instead of re-fetching
-        # from HubSpot. Only sent once the job is done to keep polling responses small.
-        'results': (job.get('results', {}) if (job.get('done') and not job.get('sync_to_hs', True)) else {})
+        # from HubSpot. Sent on every poll (not just at completion) so scores appear
+        # row-by-row as each contact finishes, instead of all at once at the end.
+        'results': (job.get('results', {}) if not job.get('sync_to_hs', True) else {})
     })
 
 @app.route('/api/screen-jobs', methods=['GET'])
