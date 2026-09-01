@@ -592,17 +592,28 @@ def pause_job():
 def screen_batch():
     if not ANTHROPIC_KEY:
         return jsonify({'error': 'ANTHROPIC_KEY not configured'}), 500
-    if not HUBSPOT_TOKEN:
-        return jsonify({'error': 'HUBSPOT_TOKEN not configured'}), 500
     data = request.get_json(force=True)
     batch_id = data.get('batch_id', '').strip()
     criteria = data.get('criteria', {})
     force = bool(data.get('force'))  # frontend can force-kill a stuck job and start fresh
+    # Local mode: contacts supplied directly in the request (e.g. from a CSV import)
+    # instead of a HubSpot batch_id. No HubSpot read OR write happens on this path —
+    # sync_to_hubspot is forced off regardless of what's sent, since these contacts
+    # were never in HubSpot and have no real hubspot_id to write back to.
+    local_contacts = data.get('contacts')
+    is_local = bool(local_contacts)
     # Scoring-only mode: when False, contacts are still fetched from HubSpot (that's
     # the data source) but scores are never written back — nothing leaves this app.
-    sync_to_hs = bool(data.get('sync_to_hubspot', True))
+    sync_to_hs = False if is_local else bool(data.get('sync_to_hubspot', True))
+    if not is_local and not HUBSPOT_TOKEN:
+        return jsonify({'error': 'HUBSPOT_TOKEN not configured'}), 500
     if not batch_id:
-        return jsonify({'error': 'batch_id required'}), 400
+        if is_local:
+            # Local runs don't need a real HubSpot batch — synthesize a label purely
+            # for job tracking (the 409/stale-job guard below keys off batch_id).
+            batch_id = f'local-{uuid.uuid4().hex[:8]}'
+        else:
+            return jsonify({'error': 'batch_id required'}), 400
     with JOBS_LOCK:
         for jid, job in list(JOBS.items()):
             if job.get('batch_id') == batch_id and not job.get('done'):
@@ -625,10 +636,19 @@ def screen_batch():
                     print(f'[screen-batch] Killing job {jid} ({reason}) — starting fresh')
                     continue
                 return jsonify({'error': 'Job already running', 'job_id': jid, 'hb_age': round(hb_age, 1)}), 409
-    try:
-        contacts = _fetch_contacts(batch_id, full=False)
-    except Exception as e:
-        return jsonify({'error': f'Failed to fetch contacts: {e}'}), 500
+    if is_local:
+        # Give every local contact a stable synthetic id (reused by the frontend to
+        # match results back to rows) since there's no real hubspot_id for these.
+        contacts = []
+        for i, c in enumerate(local_contacts):
+            c = dict(c)
+            c.setdefault('hubspot_id', f'local-{i}')
+            contacts.append(c)
+    else:
+        try:
+            contacts = _fetch_contacts(batch_id, full=False)
+        except Exception as e:
+            return jsonify({'error': f'Failed to fetch contacts: {e}'}), 500
     already = sum(1 for c in contacts if c.get('existing_track') and c.get('existing_score'))
     to_do = len(contacts) - already
     job_id = str(uuid.uuid4())[:8]
@@ -697,8 +717,9 @@ def write_results():
     updated, failed, errors = 0, 0, []
     for r in results:
         hid = r.get('hubspot_id')
-        if not hid:
+        if not hid or str(hid).startswith('local-'):
             failed += 1
+            errors.append({'id': hid, 'error': 'Not a real HubSpot contact (locally-imported) — nothing to write'})
             continue
         ok, err = _write_to_hs(hid, r)
         if ok:
@@ -714,6 +735,8 @@ def write_contact():
     hid = data.get('hubspot_id')
     if not hid:
         return jsonify({'error': 'hubspot_id required'}), 400
+    if str(hid).startswith('local-'):
+        return jsonify({'ok': False, 'error': 'Not a real HubSpot contact (locally-imported) — nothing to write'})
     if not HUBSPOT_TOKEN:
         return jsonify({'error': 'HUBSPOT_TOKEN not configured'}), 500
     ok, err = _write_to_hs(hid, data)
