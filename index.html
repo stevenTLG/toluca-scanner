@@ -706,7 +706,7 @@ async function regenerateHooks() {
 
 function startPolling() {
   if (pollInterval) clearInterval(pollInterval);
-  pollInterval = setInterval(pollJobStatus, 3000);
+  pollInterval = setInterval(pollJobStatus, 1500);
   pollJobStatus(); // immediate first poll
 }
 
@@ -762,8 +762,17 @@ async function pollJobStatus() {
       _hidePauseBtn();
       const btn = document.getElementById('btnRun');
       if (btn) { btn.disabled = false; btn.textContent = '▶ Run Screener'; }
-      document.getElementById('server-progress-label').textContent = 'Screening stopped unexpectedly — click Run Screener to resume.';
-      document.getElementById('controlDesc').textContent = 'The job stopped (server restarted). Click Run Screener to continue from where it left off.';
+      const recoveredCount = job.results ? Object.keys(job.results).length : 0;
+      if (job.recovered_from_disk) {
+        document.getElementById('server-progress-label').textContent =
+          `Server restarted mid-run — recovered ${recoveredCount} of ${job.total} scores from disk, none lost.`;
+        document.getElementById('controlDesc').textContent =
+          `Nothing was lost — ${recoveredCount} scores were saved to disk before the restart and are shown below. ` +
+          `Re-running Run Screener will re-score everyone (this build doesn't skip already-recovered contacts yet), which is safe but re-spends on ones already done.`;
+      } else {
+        document.getElementById('server-progress-label').textContent = 'Screening stopped unexpectedly — click Run Screener to resume.';
+        document.getElementById('controlDesc').textContent = 'The job stopped (server restarted). Click Run Screener to continue from where it left off.';
+      }
     }
   } catch(e) {}
 }
@@ -920,6 +929,15 @@ async function reconnectJob() {
     if (job.dead || (typeof job.hb_age === 'number' && job.hb_age > 90)) {
       console.log('[reconnectJob] Job', saved.job_id, 'is dead (hb_age=' + job.hb_age + 's) — clearing, will start fresh');
       await window.storage.delete('active_job_' + _activeBatchKey()).catch(()=>{});
+      // Before discarding, surface whatever was checkpointed to disk so nothing
+      // that actually finished scoring gets hidden from view.
+      if (job.sync_to_hubspot === false && job.results && Object.keys(job.results).length > 0) {
+        mergeJobResultsLocally(job, job.mode === 'hooks');
+        const recoveredCount = Object.keys(job.results).length;
+        document.getElementById('controlDesc').textContent = job.recovered_from_disk
+          ? `Server restarted mid-run — recovered ${recoveredCount} of ${job.total} scores from disk, none lost. Re-run to score the rest.`
+          : `Previous job stopped mid-run — showing the ${recoveredCount} contacts that finished before it stopped.`;
+      }
       return;
     }
 
