@@ -142,15 +142,17 @@ def _fetch_contacts(batch_id, full=False):
         for c in raw_contacts
         if c.get('properties', {}).get('associatedcompanyid', '')
     ))
+    company_id_to_phone = {}
     for i in range(0, len(co_ids), 100):
         batch = co_ids[i:i+100]
         co_resp = requests.post(f'{HUBSPOT_BASE}/crm/v3/objects/companies/batch/read',
             headers=hs_headers(),
-            json={'inputs': [{'id': cid} for cid in batch], 'properties': ['name']},
+            json={'inputs': [{'id': cid} for cid in batch], 'properties': ['name', 'phone']},
             timeout=20)
         if co_resp.ok:
             for co in co_resp.json().get('results', []):
                 company_id_to_name[co['id']] = co.get('properties', {}).get('name', '')
+                company_id_to_phone[co['id']] = co.get('properties', {}).get('phone', '')
 
     for c in raw_contacts:
         p = c.get('properties', {})
@@ -164,6 +166,7 @@ def _fetch_contacts(batch_id, full=False):
             'jobTitle': p.get('jobtitle', ''),
             'company': company_name,
             'email': p.get('email', ''),
+            'phone': company_id_to_phone.get(co_id, ''),
             'linkedin': p.get('hs_linkedinid', ''),
             'industry': p.get('industry', ''),
             'location': loc,
@@ -185,9 +188,9 @@ def _fetch_contacts(batch_id, full=False):
                 'existing_override_note': p.get('scanner_override_note', ''),
                 'existing_notes': p.get('scanner_notes', ''),
             })
-        # Skip contacts with no email — they can't be screened or pushed to Reply.io
-        if not entry['email']:
-            continue
+        # Contacts without email are still included — screening only needs company/owner
+        # background, not an email address. Email is only required if you go on to push
+        # to Reply.io, which is a separate, explicit step.
         contacts.append(entry)
     return contacts
 
