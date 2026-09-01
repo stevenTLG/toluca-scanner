@@ -330,7 +330,7 @@ def _screen_one(contact, criteria):
         raise Exception(f"JSON parse failed: {text[:300]}")
     raise Exception("All attempts failed")
 
-def _run_job(job_id, contacts, criteria):
+def _run_job(job_id, contacts, criteria, sync_to_hs=True):
     with JOBS_LOCK:
         JOBS[job_id]['status'] = 'running'
         JOBS[job_id]['heartbeat'] = time.time()
@@ -352,9 +352,12 @@ def _run_job(job_id, contacts, criteria):
             t_start = time.time()
             result = _screen_one(contact, criteria)
             duration_ms = int((time.time() - t_start) * 1000)
-            ok, err = _write_to_hs(contact['hubspot_id'], result)
-            if not ok:
-                errors.append({'contact': name, 'error': f'HubSpot: {err}'})
+            # Scoring-only mode: skip the write-back to HubSpot entirely. The score
+            # still lands in JOBS[job_id]['results'] below so it shows in the UI.
+            if sync_to_hs:
+                ok, err = _write_to_hs(contact['hubspot_id'], result)
+                if not ok:
+                    errors.append({'contact': name, 'error': f'HubSpot: {err}'})
             tok = result.pop('_tokens', {})
             tok_in = tok.get('input', 0)
             tok_out = tok.get('output', 0)
@@ -460,7 +463,7 @@ def _write_hook_to_hs(hubspot_id, hook):
                           headers=hs_headers(), json={'properties': props}, timeout=15)
     return resp.ok, (None if resp.ok else f"HTTP {resp.status_code}: {resp.text[:200]}")
 
-def _run_hook_job(job_id, contacts, criteria):
+def _run_hook_job(job_id, contacts, criteria, sync_to_hs=True):
     with JOBS_LOCK:
         JOBS[job_id]['status'] = 'running'
         JOBS[job_id]['heartbeat'] = time.time()
@@ -476,9 +479,11 @@ def _run_hook_job(job_id, contacts, criteria):
             t_start = time.time()
             result = _regen_hook_one(contact, criteria)
             duration_ms = int((time.time() - t_start) * 1000)
-            ok, err = _write_hook_to_hs(contact['hubspot_id'], result.get('hook', ''))
-            if not ok:
-                errors.append({'contact': name, 'error': f'HubSpot: {err}'})
+            # Scoring-only mode: skip the write-back to HubSpot entirely.
+            if sync_to_hs:
+                ok, err = _write_hook_to_hs(contact['hubspot_id'], result.get('hook', ''))
+                if not ok:
+                    errors.append({'contact': name, 'error': f'HubSpot: {err}'})
             tok = result.get('_tokens', {})
             tok_in, tok_out = tok.get('input', 0), tok.get('output', 0)
             contact_cost = round((tok_in * 3 / 1_000_000) + (tok_out * 15 / 1_000_000), 5)
@@ -525,6 +530,7 @@ def regen_hooks():
     batch_id = data.get('batch_id', '').strip()
     criteria = data.get('criteria', {})
     force = bool(data.get('force'))
+    sync_to_hs = bool(data.get('sync_to_hubspot', True))
     if not batch_id:
         return jsonify({'error': 'batch_id required'}), 400
     # Same live/stale guard as screen-batch so a regen can't collide with a running job.
@@ -560,12 +566,13 @@ def regen_hooks():
             'total': len(contacts), 'total_contacts': len(contacts), 'processed': 0,
             'skipped': 0, 'current_contact': None, 'current_index': 0,
             'errors': [], 'results': {}, 'done': False, 'started_at': time.time(),
-            'heartbeat': time.time(), 'finished_at': None,
+            'heartbeat': time.time(), 'finished_at': None, 'sync_to_hs': sync_to_hs,
             'tokens_input': 0, 'tokens_output': 0, 'contact_meta': {}
         }
-    threading.Thread(target=_run_hook_job, args=(job_id, contacts, criteria), daemon=True).start()
+    threading.Thread(target=_run_hook_job, args=(job_id, contacts, criteria, sync_to_hs), daemon=True).start()
     return jsonify({'ok': True, 'job_id': job_id, 'total': len(contacts),
-                    'already_screened': 0, 'total_contacts': len(contacts), 'mode': 'hooks'})
+                    'already_screened': 0, 'total_contacts': len(contacts), 'mode': 'hooks',
+                    'sync_to_hubspot': sync_to_hs})
 
 @app.route('/api/pause-job', methods=['POST'])
 def pause_job():
@@ -588,6 +595,9 @@ def screen_batch():
     batch_id = data.get('batch_id', '').strip()
     criteria = data.get('criteria', {})
     force = bool(data.get('force'))  # frontend can force-kill a stuck job and start fresh
+    # Scoring-only mode: when False, contacts are still fetched from HubSpot (that's
+    # the data source) but scores are never written back — nothing leaves this app.
+    sync_to_hs = bool(data.get('sync_to_hubspot', True))
     if not batch_id:
         return jsonify({'error': 'batch_id required'}), 400
     with JOBS_LOCK:
@@ -626,11 +636,12 @@ def screen_batch():
             'total': to_do, 'total_contacts': len(contacts), 'processed': 0,
             'skipped': already, 'current_contact': None, 'current_index': 0,
             'errors': [], 'results': {}, 'done': False, 'started_at': time.time(),
-            'heartbeat': time.time(),
+            'heartbeat': time.time(), 'sync_to_hs': sync_to_hs,
             'finished_at': None, 'tokens_input': 0, 'tokens_output': 0, 'contact_meta': {}
         }
-    threading.Thread(target=_run_job, args=(job_id, contacts, criteria), daemon=True).start()
-    return jsonify({'ok': True, 'job_id': job_id, 'total': to_do, 'already_screened': already, 'total_contacts': len(contacts)})
+    threading.Thread(target=_run_job, args=(job_id, contacts, criteria, sync_to_hs), daemon=True).start()
+    return jsonify({'ok': True, 'job_id': job_id, 'total': to_do, 'already_screened': already,
+                    'total_contacts': len(contacts), 'sync_to_hubspot': sync_to_hs})
 
 @app.route('/api/screen-status/<job_id>', methods=['GET'])
 def screen_status(job_id):
@@ -648,7 +659,7 @@ def screen_status(job_id):
         eta = int(rate * (job['total'] - job['processed']))
     return jsonify({
         'job_id': job['job_id'], 'batch_id': job['batch_id'], 'status': job['status'],
-        'mode': job.get('mode', 'screen'),
+        'mode': job.get('mode', 'screen'), 'sync_to_hubspot': job.get('sync_to_hs', True),
         'total': job['total'], 'total_contacts': job.get('total_contacts', job['total']),
         'processed': job['processed'], 'skipped': job.get('skipped', 0), 'pct': pct,
         'current_contact': job.get('current_contact'), 'errors': job.get('errors', []),
@@ -656,7 +667,11 @@ def screen_status(job_id):
         'elapsed_s': elapsed, 'eta_s': eta, 'hb_age': hb_age, 'dead': is_dead,
         'tokens_input': job.get('tokens_input', 0), 'tokens_output': job.get('tokens_output', 0),
         'cost': round((job.get('tokens_input', 0) * 3 / 1_000_000) + (job.get('tokens_output', 0) * 15 / 1_000_000), 4),
-        'contact_meta': job.get('contact_meta', {}) if job.get('done') else {}
+        'contact_meta': job.get('contact_meta', {}) if job.get('done') else {},
+        # Only needed when sync_to_hs is off (nothing was written to HubSpot), so the
+        # frontend can populate scores/hooks from the job itself instead of re-fetching
+        # from HubSpot. Only sent once the job is done to keep polling responses small.
+        'results': (job.get('results', {}) if (job.get('done') and not job.get('sync_to_hs', True)) else {})
     })
 
 @app.route('/api/screen-jobs', methods=['GET'])
