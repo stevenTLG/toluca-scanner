@@ -2925,6 +2925,8 @@ function buildRowHTML(contact, result, index) {
   const safeName = escapeHtml(name);
   const safeCompany = escapeHtml(contact.company || ' - ');
   const safeLocation = escapeHtml(contact.location || ' - ');
+  const phoneHTML = contact.phone
+    ? `<div class="contact-phone" style="font-size:11px;color:var(--gold);margin-top:2px">📞 ${escapeHtml(contact.phone)}</div>` : '';
   const hasOverride = !!overrides[index];
   const hasNotes = !!(notes[index] && notes[index].trim());
   const currentHook = hookEdits[index] || (result && result.hook) || '';
@@ -2935,7 +2937,7 @@ function buildRowHTML(contact, result, index) {
     ? `<span class="note-icon has-note" onclick="toggleNotesInline(${index})" title="View/edit note">📝 <span style="font-size:10px;color:var(--amber)">${escapeHtml(notes[index].slice(0,30))}${notes[index].length>30?'...':''}</span></span>`
     : `<span class="note-icon" onclick="toggleNotesInline(${index})" title="Add note" style="opacity:0;transition:opacity .15s">+ note</span>`;
   const notesInline = `<div class="notes-inline" id="notes-inline-${index}" style="display:none;margin-top:6px"><textarea class="notes-edit" id="notes-ta-${index}" placeholder="Add a note..." style="min-height:44px;font-size:11px">${escapeHtml(notes[index]||'')}</textarea><button class="notes-save-btn" onclick="saveNote(${index})">Save</button></div>`;
-  const contactHTML = `<div class="contact-name">${safeName}</div><div class="contact-company">${safeCompany}</div>${naics}<div class="contact-location">${safeLocation}</div>${noteIcon}${notesInline}`;
+  const contactHTML = `<div class="contact-name">${safeName}</div><div class="contact-company">${safeCompany}</div>${naics}<div class="contact-location">${safeLocation}</div>${phoneHTML}${noteIcon}${notesInline}`;
 
   // TRACK CELL
   let trackHTML;
@@ -3262,7 +3264,7 @@ function setFilter(filter, btn) {
 // ─── CSV EXPORT ───────────────────────────────────────────────
 // Columns requested by the user (exact order):
 // First Name, Last Name, Company, Title, Location, Industry, Email, LinkedIn, Score, Hook, Connections, Notes
-const EXPORT_HEADERS = ['First Name','Last Name','Company','Title','Location','Industry','Email','LinkedIn','Score','Hook','Connections','Notes'];
+const EXPORT_HEADERS = ['First Name','Last Name','Company','Title','Location','Phone','Industry','Email','LinkedIn','Score','Hook','Connections','Notes'];
 
 function _exportRowFor(i) {
   const c = allContacts[i];
@@ -3275,6 +3277,7 @@ function _exportRowFor(i) {
     c.company || '',
     c.jobTitle || '',
     c.location || '',
+    c.phone || '',
     c.industry || '',
     c.email || '',
     c.linkedin || '',
