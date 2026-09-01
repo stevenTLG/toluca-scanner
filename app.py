@@ -79,6 +79,54 @@ ANTHROPIC_BASE = 'https://api.anthropic.com'
 JOBS = {}
 JOBS_LOCK = threading.Lock()
 
+# Checkpoint directory: job progress is flushed here after every single contact,
+# so if the server process dies mid-run (crash, OOM, restart within the same
+# container) finished work isn't lost — only the process's in-memory state is.
+# Note: this does NOT survive a full redeploy/container rebuild on most hosts
+# (Render's default disk is ephemeral across those) — it only protects against
+# the process itself restarting while the container stays up.
+CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'job_checkpoints')
+os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+
+def _checkpoint_path(job_id):
+    return os.path.join(CHECKPOINT_DIR, f'{job_id}.json')
+
+def _write_checkpoint(job_id):
+    """Atomic write (temp file + rename) so a crash mid-write can't corrupt the
+    checkpoint. Called after every contact, so the cost has to stay small —
+    only the fields needed to recover/display results are persisted."""
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            return
+        snapshot = {
+            'job_id': job_id, 'batch_id': job.get('batch_id'), 'status': job.get('status'),
+            'mode': job.get('mode', 'screen'), 'sync_to_hs': job.get('sync_to_hs', True),
+            'total': job.get('total'), 'total_contacts': job.get('total_contacts'),
+            'processed': job.get('processed'), 'skipped': job.get('skipped'),
+            'errors': job.get('errors', []), 'results': job.get('results', {}),
+            'done': job.get('done'), 'started_at': job.get('started_at'),
+            'finished_at': job.get('finished_at'),
+        }
+    tmp_path = _checkpoint_path(job_id) + '.tmp'
+    try:
+        with open(tmp_path, 'w') as f:
+            json.dump(snapshot, f)
+        os.replace(tmp_path, _checkpoint_path(job_id))
+    except Exception as e:
+        print(f'[checkpoint] Failed to write checkpoint for {job_id}: {e}')
+
+def _read_checkpoint(job_id):
+    path = _checkpoint_path(job_id)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception as e:
+        print(f'[checkpoint] Failed to read checkpoint for {job_id}: {e}')
+        return None
+
 def hs_headers():
     return {'Authorization': f'Bearer {HUBSPOT_TOKEN}', 'Content-Type': 'application/json'}
 
@@ -385,6 +433,7 @@ def _run_job(job_id, contacts, criteria, sync_to_hs=True):
                 JOBS[job_id]['heartbeat'] = time.time()
         with JOBS_LOCK:
             JOBS[job_id]['errors'] = errors
+        _write_checkpoint(job_id)  # flush progress to disk after every contact
         if i < len(contacts) - 1:
             time.sleep(2)
         # Pause support — wait here until unpaused, keeping the heartbeat fresh
@@ -399,6 +448,7 @@ def _run_job(job_id, contacts, criteria, sync_to_hs=True):
             'processed': processed, 'current_contact': None,
             'heartbeat': time.time(), 'finished_at': time.time()
         })
+    _write_checkpoint(job_id)
 
 # ─── HOOK-ONLY REGENERATION ───────────────────────────────────────────────────
 # Regenerates just the {{hook}} for a contact, preserving the existing score,
@@ -510,6 +560,7 @@ def _run_hook_job(job_id, contacts, criteria, sync_to_hs=True):
                 JOBS[job_id]['heartbeat'] = time.time()
         with JOBS_LOCK:
             JOBS[job_id]['errors'] = errors
+        _write_checkpoint(job_id)  # flush progress to disk after every contact
         if i < len(contacts) - 1:
             time.sleep(2)
         while JOBS.get(job_id, {}).get('paused'):
@@ -522,6 +573,7 @@ def _run_hook_job(job_id, contacts, criteria, sync_to_hs=True):
             'processed': processed, 'current_contact': None,
             'heartbeat': time.time(), 'finished_at': time.time()
         })
+    _write_checkpoint(job_id)
 
 @app.route('/api/regen-hooks', methods=['POST'])
 def regen_hooks():
@@ -670,14 +722,27 @@ def screen_batch():
 def screen_status(job_id):
     with JOBS_LOCK:
         job = JOBS.get(job_id)
+    recovered = False
     if not job:
-        return jsonify({'error': 'Job not found'}), 404
+        # Not in memory — either it never existed, or the server process
+        # restarted mid-run. Check the on-disk checkpoint before giving up;
+        # if found, whatever was completed before the crash is still there.
+        checkpoint = _read_checkpoint(job_id)
+        if not checkpoint:
+            return jsonify({'error': 'Job not found'}), 404
+        recovered = True
+        job = {
+            **checkpoint,
+            'status': 'crashed' if not checkpoint.get('done') else checkpoint.get('status', 'done'),
+            'current_contact': None, 'heartbeat': 0,
+            'tokens_input': 0, 'tokens_output': 0, 'contact_meta': {},
+        }
     elapsed = int(time.time() - job['started_at'])
     hb_age = round(time.time() - job.get('heartbeat', job['started_at']), 1)
-    is_dead = (not job['done']) and hb_age > 90
+    is_dead = recovered or ((not job['done']) and hb_age > 90)
     pct = round((job['processed'] / job['total']) * 100) if job['total'] > 0 else 0
     eta = None
-    if job['processed'] > 0 and not job['done'] and job['total'] > 0:
+    if job['processed'] > 0 and not job['done'] and job['total'] > 0 and not recovered:
         rate = elapsed / job['processed']
         eta = int(rate * (job['total'] - job['processed']))
     return jsonify({
@@ -687,6 +752,7 @@ def screen_status(job_id):
         'processed': job['processed'], 'skipped': job.get('skipped', 0), 'pct': pct,
         'current_contact': job.get('current_contact'), 'errors': job.get('errors', []),
         'error_count': len(job.get('errors', [])), 'done': job['done'],
+        'recovered_from_disk': recovered,
         'elapsed_s': elapsed, 'eta_s': eta, 'hb_age': hb_age, 'dead': is_dead,
         'tokens_input': job.get('tokens_input', 0), 'tokens_output': job.get('tokens_output', 0),
         'cost': round((job.get('tokens_input', 0) * 3 / 1_000_000) + (job.get('tokens_output', 0) * 15 / 1_000_000), 4),
