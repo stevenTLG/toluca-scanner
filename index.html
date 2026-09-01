@@ -721,6 +721,14 @@ async function pollJobStatus() {
     if (!resp.ok) return;
     const job = await resp.json();
     updateProgressUI(job);
+
+    // Local (no-HubSpot) mode: merge in whatever scores are ready so far, so
+    // rows populate one by one as each contact finishes instead of waiting for
+    // the whole batch. mergeJobResultsLocally only touches contacts present in
+    // job.results, so this is safe to call repeatedly as more finish.
+    if (job.sync_to_hubspot === false && job.results && Object.keys(job.results).length > 0) {
+      mergeJobResultsLocally(job, job.mode === 'hooks');
+    }
     // Update token display from server-side job
     if (job.tokens_input || job.tokens_output) {
       // Set absolute totals (not additive) so we don't double-count across polls
@@ -858,7 +866,10 @@ function mergeJobResultsLocally(job, isHooks) {
         override_note:   '',
         _preloaded:      false
       };
-      if (r.hook) hookEdits[i] = r.hook;
+      // Only seed hookEdits from the AI's output if the user hasn't already
+      // manually edited this contact's hook (which can happen mid-run, since
+      // this merge now runs on every poll rather than just at completion).
+      if (r.hook && hookEdits[i] === undefined) hookEdits[i] = r.hook;
     }
   });
   saveResults();
@@ -3736,10 +3747,10 @@ function parseCSV(text) {
     // Combined name field (e.g. a call-list's "Officer" column) — split after mapping
     'officer': 'fullName', 'owner': 'fullName', 'contact name': 'fullName', 'name': 'fullName',
     // Contact
-    'email': 'email', 'email address': 'email', 'work email': 'email',
+    'email': 'email', 'email address': 'email', 'work email': 'email', 'personal email': 'email', 'company email': 'email',
     'linkedin': 'linkedin', 'linkedin url': 'linkedin', 'linkedin profile': 'linkedin', 'linkedin profile url': 'linkedin',
     // Company details
-    'industry': 'industry', 'naics': 'industry', 'industry code': 'industry',
+    'industry': 'industry', 'naics': 'industry', 'industry code': 'industry', 'trade class': 'industry',
     'location': 'location', 'city': 'location', 'headquarters': 'location', 'hq location': 'location',
     'description': 'description', 'company description': 'description', 'about': 'description',
     'revenue': 'revenue', 'annual revenue': 'revenue', 'estimated revenue': 'revenue', 'revenues': 'revenue',
