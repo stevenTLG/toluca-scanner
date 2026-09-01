@@ -227,6 +227,10 @@
           <span id="server-progress-eta" style="font-size:10px;color:#555"></span>
         </div>
       </div>
+      <label id="syncToggleLabel" style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11px;color:var(--text-muted);cursor:pointer;user-select:none" title="When off, contacts are still scored but nothing is written back to HubSpot.">
+        <input type="checkbox" id="syncToHubSpotToggle" style="width:14px;height:14px;cursor:pointer">
+        Sync results to HubSpot
+      </label>
       <p class="concurrency-note" id="concurrencyNote"></p>
       <div class="progress-bar" id="progressBar" style="display:none">
         <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
@@ -471,6 +475,11 @@ async function togglePauseScreening() {
   } catch(e) {}
 }
 
+function getSyncToHubSpotSetting() {
+  const el = document.getElementById('syncToHubSpotToggle');
+  return el ? !!el.checked : true;
+}
+
 function buildCriteriaPayload() {
   // Collect current criteria to send to the server
   const profile = {
@@ -513,11 +522,13 @@ async function startServerScreening() {
   document.getElementById('server-progress').style.display = 'block';
   document.getElementById('controlDesc').textContent = 'Server is processing contacts — you can close this tab safely.';
 
+  const syncToHubSpot = getSyncToHubSpotSetting();
+
   try {
     const resp = await fetch('/api/screen-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ batch_id: BATCH_ID, criteria: buildCriteriaPayload() })
+      body: JSON.stringify({ batch_id: BATCH_ID, criteria: buildCriteriaPayload(), sync_to_hubspot: syncToHubSpot })
     });
     const data = await resp.json();
 
@@ -533,7 +544,7 @@ async function startServerScreening() {
           const forceResp = await fetch('/api/screen-batch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ batch_id: BATCH_ID, criteria: buildCriteriaPayload(), force: true })
+            body: JSON.stringify({ batch_id: BATCH_ID, criteria: buildCriteriaPayload(), force: true, sync_to_hubspot: syncToHubSpot })
           });
           const forceData = await forceResp.json();
           if (forceResp.ok && forceData.job_id) {
@@ -634,14 +645,16 @@ async function regenerateHooks() {
     if (runBtn) runBtn.disabled = false;
   }
 
+  const syncToHubSpot = getSyncToHubSpotSetting();
+
   try {
-    let { r: resp, d: data } = await post({ batch_id: BATCH_ID, criteria: buildCriteriaPayload() });
+    let { r: resp, d: data } = await post({ batch_id: BATCH_ID, criteria: buildCriteriaPayload(), sync_to_hubspot: syncToHubSpot });
 
     // 409 = a job already exists. Reconnect if alive, force-restart if stale.
     if (resp.status === 409 && data.job_id) {
       const hbAge = typeof data.hb_age === 'number' ? data.hb_age : 999;
       if (hbAge > 30) {
-        ({ r: resp, d: data } = await post({ batch_id: BATCH_ID, criteria: buildCriteriaPayload(), force: true }));
+        ({ r: resp, d: data } = await post({ batch_id: BATCH_ID, criteria: buildCriteriaPayload(), force: true, sync_to_hubspot: syncToHubSpot }));
       } else {
         activeJobId = data.job_id;
         if (btn) btn.textContent = '⏳ Regenerating...';
@@ -761,9 +774,6 @@ async function onScreeningComplete(job) {
   document.getElementById('server-progress-eta').textContent = '✓ Complete';
   document.getElementById('server-progress-pct').textContent = '100%';
   document.getElementById('server-progress-fill').style.width = '100%';
-  document.getElementById('controlDesc').textContent = isHooks
-    ? `Hook regeneration complete — ${job.processed} hooks rewritten. Reloading results from HubSpot...`
-    : `Screening complete — ${job.processed} contacts scored. Reloading results from HubSpot...`;
 
   activeJobId = null;
   try { await window.storage.delete('active_job_' + BATCH_ID); } catch(e) {}
@@ -779,14 +789,64 @@ async function onScreeningComplete(job) {
     } catch(e) {}
   }
 
-  // Reload batch from HubSpot to get all freshly-written results
-  await new Promise(r => setTimeout(r, 1500));
-  await loadBatchFromHubSpot(BATCH_ID);
+  if (job.sync_to_hubspot === false) {
+    // Scoring-only mode: nothing was written to HubSpot, so re-fetching the batch
+    // from HubSpot (the normal path below) would show these contacts as still
+    // unscreened. Instead, merge the freshly computed scores/hooks straight from
+    // the job into the in-memory results and persist them locally.
+    document.getElementById('controlDesc').textContent = isHooks
+      ? `Hook regeneration complete — ${job.processed} hooks generated (not synced to HubSpot).`
+      : `Screening complete — ${job.processed} contacts scored (not synced to HubSpot).`;
+    mergeJobResultsLocally(job, isHooks);
+  } else {
+    document.getElementById('controlDesc').textContent = isHooks
+      ? `Hook regeneration complete — ${job.processed} hooks rewritten. Reloading results from HubSpot...`
+      : `Screening complete — ${job.processed} contacts scored. Reloading results from HubSpot...`;
+    // Reload batch from HubSpot to get all freshly-written results
+    await new Promise(r => setTimeout(r, 1500));
+    await loadBatchFromHubSpot(BATCH_ID);
+  }
 
   if (job.error_count > 0) {
     document.getElementById('controlDesc').textContent =
       `Done — ${job.processed} screened, ${job.error_count} errors. Check console for details.`;
   }
+}
+
+// Merge scoring-only job results (keyed by hubspot_id) into the local, index-keyed
+// `results` object and persist to local storage. Used when sync_to_hubspot is off,
+// since there is nothing written to HubSpot to reload from.
+function mergeJobResultsLocally(job, isHooks) {
+  const byHubspotId = job.results || {};
+  if (Object.keys(byHubspotId).length === 0) return;
+  allContacts.forEach((c, i) => {
+    if (!c.hubspot_id || !byHubspotId[c.hubspot_id]) return;
+    const r = byHubspotId[c.hubspot_id];
+    if (isHooks) {
+      // Hook-only regen: keep existing score/track/etc, just update the hook.
+      results[i] = { ...(results[i] || { status: 'done' }), status: 'done', hook: r.hook || '' };
+      hookEdits[i] = r.hook || '';
+    } else {
+      results[i] = {
+        status:          'done',
+        track:           r.track || '',
+        score:           r.score,
+        hook:            r.hook || '',
+        recommendation:  r.recommendation || '',
+        track_reason:    r.track_reason || '',
+        connections:     r.connections || [],
+        industryCluster: r.industryCluster || '',
+        override:        false,
+        override_note:   '',
+        _preloaded:      false
+      };
+      if (r.hook) hookEdits[i] = r.hook;
+    }
+  });
+  saveResults();
+  saveHooks();
+  renderTable();
+  updateStats();
 }
 
 // On page load: reconnect to any running job for this batch
@@ -814,9 +874,14 @@ async function reconnectJob() {
     if (job.done) {
       // Job finished while we were away — reload results
       await window.storage.delete('active_job_' + BATCH_ID).catch(()=>{});
-      document.getElementById('controlDesc').textContent = 'Previous screening job completed. Reloading...';
-      await new Promise(r => setTimeout(r, 800));
-      await loadBatchFromHubSpot(BATCH_ID);
+      if (job.sync_to_hubspot === false) {
+        document.getElementById('controlDesc').textContent = 'Previous scoring-only job completed. Loading results...';
+        mergeJobResultsLocally(job, job.mode === 'hooks');
+      } else {
+        document.getElementById('controlDesc').textContent = 'Previous screening job completed. Reloading...';
+        await new Promise(r => setTimeout(r, 800));
+        await loadBatchFromHubSpot(BATCH_ID);
+      }
       return;
     }
 
@@ -1598,6 +1663,20 @@ if (BATCH_ID) {
     if (savedNotes && savedNotes.value) notes = JSON.parse(savedNotes.value);
     if (savedHooks && savedHooks.value) hookEdits = JSON.parse(savedHooks.value);
     if (savedHookFb && savedHookFb.value) hookFeedback = JSON.parse(savedHookFb.value);
+  } catch(e) {}
+
+  // Restore the sync-to-HubSpot toggle (defaults to on/checked if never set)
+  try {
+    const savedSync = await window.storage.get('sync_to_hubspot').catch(()=>null);
+    const syncEl = document.getElementById('syncToHubSpotToggle');
+    if (syncEl && savedSync && savedSync.value !== null) {
+      syncEl.checked = savedSync.value === 'true';
+    }
+    if (syncEl) {
+      syncEl.addEventListener('change', () => {
+        window.storage.set('sync_to_hubspot', syncEl.checked ? 'true' : 'false').catch(()=>{});
+      });
+    }
   } catch(e) {}
 
   // Load search selection and trigger label edits
@@ -2502,6 +2581,12 @@ const _pendingSaves = {};   // hubspot_id → { timer, payload }
 const _DEBOUNCE_MS  = 3000; // 3 seconds
 
 function autoSaveToHubSpot(hubspot_id, result) {
+  // Respect the scoring-only toggle: skip the HubSpot write entirely, but still
+  // show a lightweight indicator so it's clear the edit was saved locally only.
+  if (!getSyncToHubSpotSetting()) {
+    _showNotSyncedIndicator();
+    return;
+  }
   // Cancel any existing timer for this contact
   if (_pendingSaves[hubspot_id]) {
     clearTimeout(_pendingSaves[hubspot_id].timer);
@@ -2560,6 +2645,19 @@ function _hideSaveIndicator() {
   const el = document.getElementById('hs-save-indicator');
   if (!el) return;
   el.textContent = '✓ Saved';
+  setTimeout(() => { if(el) el.textContent = ''; }, 2000);
+}
+function _showNotSyncedIndicator() {
+  let el = document.getElementById('hs-save-indicator');
+  if (!el) {
+    const bar = document.getElementById('batch-action-bar');
+    if (!bar) return;
+    el = document.createElement('span');
+    el.id = 'hs-save-indicator';
+    el.style.cssText = 'font-size:10px;color:var(--text-muted);letter-spacing:0.5px;opacity:0.7';
+    bar.appendChild(el);
+  }
+  el.textContent = 'Saved locally (not synced)';
   setTimeout(() => { if(el) el.textContent = ''; }, 2000);
 }
 
